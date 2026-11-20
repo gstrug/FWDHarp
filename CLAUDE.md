@@ -165,4 +165,8 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   ringing. Views: `PadsView`, `StrumPlateView`, `MultiTouchSurface` (UIKit, every
   finger, cancellations end touches). KEY menu in the top bar. Not yet: Hold,
   auto-strum, plate patterns, range setting, scales, MIDI out, Learn, help.
+- 2026-11-20: pad layout changed after Graham's first play (one pad at a time): two rows
+  F C G / Dm Am Em, and a thumb row of smaller modifier pads 7th, sus2, sus4 below-right
+  of C. sus replaces the 3rd (minor chords too); with 7th → 7sus2/7sus4; last sus
+  pressed wins. Modifiers stop nothing ringing.
 
