@@ -123,3 +123,11 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   test package with `Models/Harmony.swift` — the seven chords of a major key and their
   names — and the GitHub check). Placeholder screen. Next: a design brief with Graham,
   then copy FWD's hosting and MIDI in, then the pads and strum plate.
+- 2026-11-20: first push to GitHub (`origin` added, Validate passed). Design brief
+  agreed with Graham: Claude Doc "FWD Harp — Design Brief"
+  (https://claude.ai/artifact/F8jjZ3bSxbZqy3Gmfetmut). Key points: pads 7(pinky,
+  a hold-only 7th modifier: dominant 7ths on majors, m7 on minors) 4 1 5 on top,
+  thumb 6 3 with 2 below; no diminished chord; Hold latches the chord; plate is a
+  tall strip, low at the bottom, louder to the right, adjustable range; scales limit
+  the plate's notes; four auto-strum patterns; tempo by slider, tap, MIDI clock, Link;
+  MIDI out to apps and hardware with a mute-internal switch.
