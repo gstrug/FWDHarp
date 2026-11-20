@@ -2,7 +2,8 @@ import SwiftUI
 
 /// A test screen for the instrument hosting copied from FWD Sequencer, until the chord
 /// pads and strum plate arrive: choose an instrument (built-in or AUv3), open its
-/// editor, and hold a test chord to hear it.
+/// editor, add effects, and hold a test chord (or play a MIDI keyboard) to hear it.
+/// The instrument, its sound and the effects are remembered between launches.
 struct ContentView: View {
     @StateObject private var store = InstrumentStore()
     @State private var showPicker = false
@@ -10,6 +11,7 @@ struct ContentView: View {
     @State private var showPluginEditor = false
     @State private var showCredits = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,6 +39,7 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showPluginEditor) {
             PluginEditorView(trackID: InstrumentStore.partID,
                              trackName: store.instrumentName,
+                             onCommitState: { store.captureInstrumentState() },
                              onReload: { store.reload() })
         }
         .sheet(isPresented: $showCredits) { CreditsView() }
@@ -63,6 +66,10 @@ struct ContentView: View {
                 .contentShape(Rectangle())
                 .transition(.opacity)
             }
+        }
+        // A safe moment to keep the instrument's sound and save (FWD lesson 3).
+        .onChange(of: scenePhase) { phase in
+            if phase == .background { store.captureAndSave() }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: store.isLoading)
         .alert("FWD Harp", isPresented: Binding(
@@ -101,6 +108,8 @@ struct ContentView: View {
             StudioTapButton(title: "EDIT") {
                 if store.plugin == nil { showBuiltInSounds = true } else { showPluginEditor = true }
             }
+
+            EffectsToggleButton(store: store)
                 .accessibilityLabel("Edit Instrument")
 
             Button { showCredits = true } label: {

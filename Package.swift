@@ -23,19 +23,23 @@ let package = Package(
                 "FWDHarpApp.swift",
                 "ContentView.swift",
                 "Views",
-                "Store",
+                "Store/InstrumentStore.swift",
                 // App bundle resources, loaded through Bundle.main; the core has no use
                 // for them and SwiftPM warns if they are neither declared nor excluded.
                 "Resources",
                 "Engine/AudioEngineManager.swift",
                 "Engine/AudioLevel.swift",
-                "Engine/PluginManager.swift"
+                "Engine/PluginManager.swift",
+                "Engine/MIDIInputManager.swift"
             ],
             sources: [
                 "Models/Harmony.swift",
                 "Models/PluginInfo.swift",
                 "Models/GeneralMIDI.swift",
-                "Engine/PluginLoadTracker.swift"
+                "Engine/PluginLoadTracker.swift",
+                "Models/HarpSetup.swift",
+                "Models/MIDIMessage.swift",
+                "Store/SetupStorage.swift"
             ]
         ),
         .testTarget(
