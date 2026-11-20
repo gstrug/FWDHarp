@@ -43,6 +43,13 @@ code wins — then fix this file.
   Mac (the whole `main` for the first push), stage the bundle to the cloud workspace,
   fetch it into a cloud clone of `gstrug/FWDHarp` and push from there. Then
   `git update-ref refs/remotes/origin/main <sha>` on the Mac.
+- **Test branch (Graham agreed 2026-11-20):** to compile-check work before Graham
+  builds, push it to a `claude/...` branch (never `main`) and run
+  `gh workflow run validate.yml --ref claude/<branch>`; fix errors there, then bring the
+  commits to the Mac's `main` (still unpushed, per the release rule).
+- Bringing commits from the cloud to the Mac: `git bundle` there, then
+  `device_commit_files` — it refuses large files (a ~98 MB bundle failed), so `split -b
+  20000000` the bundle, commit the parts, `cat` them together on the Mac and fetch.
 - GitHub Actions (`Validate`, `.github/workflows/validate.yml`) runs `swift test` and
   Debug and Release simulator builds — the only compile check, since nothing on
   Claude's side runs Xcode. Check with `gh run list`.
@@ -131,3 +138,13 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   tall strip, low at the bottom, louder to the right, adjustable range; scales limit
   the plate's notes; four auto-strum patterns; tempo by slider, tap, MIDI clock, Link;
   MIDI out to apps and hardware with a mute-internal switch.
+- 2026-11-20: FWD's instrument hosting copied in (step 1 of the brief's build order,
+  first half): Bridge, PluginManager, PluginLoadTracker, AudioEngineManager (stripped of
+  MIDI clock, scheduled notes, delay compensation and recording), plugin picker and
+  editor (with its piano keys), StudioControls, GM sound bank + "Join sound bank" phase,
+  licences, Credits, PrivacyInfo. `Store/InstrumentStore.swift` holds the one instrument
+  (fixed part id, default GM 46 Orchestral Harp; not saved yet). `ContentView` is a test
+  screen: instrument chip, EDIT, hold-to-sound test chords C F G Am. Compiles on GitHub.
+  Still to copy: effects (TrackEffectsView), MIDI input/Learn, help mode, saving.
+  Note: the audio buffer is FWD's 23 ms (chosen against crackle); may feel slow for live
+  strumming, so check it when the plate exists.
