@@ -155,3 +155,14 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   (MIDIControlCenter) and help mode, which need the harp's own controls.
   Note: the audio buffer is FWD's 23 ms (chosen against crackle); may feel slow for live
   strumming, so check it when the plate exists.
+- 2026-11-20: step 2, first playable harp. `Models/Pads.swift` (ChordPad, PadLayout grid
+  in pad-widths, PadSelection: last pressed wins, 7 counted apart),
+  `Models/StrumPlate.swift` (10 strings = 3 octaves of a triad, bottom string from the
+  key's note in octave 3 (48 + tonic), louder to the right 30–127, crossed strings all
+  played), `Harmony.swift` gained dominant/minor 7ths, `HarpSetup.keyTonic`.
+  `Store/HarpPlayer.swift` plays: pads silent; plucked notes ring until restruck or a
+  different chord pad is pressed; the 7 stops nothing; lifting all pads leaves notes
+  ringing. Views: `PadsView`, `StrumPlateView`, `MultiTouchSurface` (UIKit, every
+  finger, cancellations end touches). KEY menu in the top bar. Not yet: Hold,
+  auto-strum, plate patterns, range setting, scales, MIDI out, Learn, help.
+
