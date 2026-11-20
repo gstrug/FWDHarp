@@ -1,0 +1,1519 @@
+import Foundation
+import os
+@preconcurrency import AVFoundation
+import AudioToolbox
+import CoreMIDI
+import Accelerate
+
+nonisolated enum AudioEngineStatus: Equatable {
+    case ready
+    case interrupted
+    case recovering
+    case failed(String)
+}
+
+nonisolated enum PluginLoadError: LocalizedError {
+    case trackUnavailable
+    case cancelled
+    case timedOut(String)
+    case effectTimedOut(String)
+    case instantiationFailed(String, String)
+
+    var errorDescription: String? {
+        switch self {
+        case .trackUnavailable:
+            return "The instrument is no longer available."
+        case .cancelled:
+            return "Instrument loading was cancelled."
+        case .timedOut(let name):
+            return "\(name) took too long to load, so the built-in sound plays for now. "
+                + "Choose it again, or use Reload in Edit Instrument, to try again."
+        case .effectTimedOut(let name):
+            return "\(name) took too long to load and was left out for now. Add it again to try again."
+        case .instantiationFailed(let name, let detail):
+            return "\(name) could not be loaded. The built-in sound plays instead. \(detail)"
+        }
+    }
+}
+
+/// Copied from FWD Sequencer on 2026-11-20 and stripped of its sequencer parts (MIDI
+/// clock, scheduled notes, delay compensation, recording). Instruments and effects are
+/// still keyed by a "track" id, as in FWD, so its load protection carries over
+/// unchanged; FWD Harp plays one instrument part.
+///
+/// Audio graph access is protected by `auLock`; callbacks and settings shared by the
+/// main and render threads are copied under `callbackLock`.
+nonisolated final class AudioEngineManager: @unchecked Sendable {
+    // One shared audio engine / session for the whole app.
+    static let shared = AudioEngineManager()
+
+    private var engine = AVAudioEngine()
+    private var masterTapInstalled = false
+    private var samplers: [UUID: AVAudioUnitSampler] = [:]
+    /// Each track's General MIDI sound for its built-in sampler (see setBuiltInSound).
+    private var builtInSounds: [UUID: Int] = [:]
+    private var auv3Units: [UUID: AVAudioUnit] = [:]
+    /// AUv3 effects per track, in signal order between the instrument and the mixer.
+    /// An array rather than a single optional so raising SongTrack.maximumEffects is a
+    /// constant change rather than a restructuring here.
+    private var effectUnits: [UUID: [AVAudioUnit]] = [:]
+    /// Effects the host is bypassing, held by unit identity rather than by index —
+    /// indices move when the chain is reordered. Entries are dropped the moment a unit
+    /// is detached: an address freed and reused would otherwise silently bypass whatever
+    /// took its place.
+    private var bypassedUnits: Set<ObjectIdentifier> = []
+    /// Effects that would not connect in any format (see connectEffectLocked): left out
+    /// of the chain, like a bypassed one, rather than crashing the app.
+    private var refusedUnits: Set<ObjectIdentifier> = []
+    /// Format converters put in front of effects that would not take the track's own
+    /// format, per track, so the next rebuild can remove them.
+    private var effectAdapters: [UUID: [AVAudioMixerNode]] = [:]
+    private var trackMixers: [UUID: AVAudioMixerNode] = [:]
+
+    /// Taken on the AUDIO RENDER THREAD by the metering taps, so it is an unfair lock
+    /// rather than an NSLock: a pthread mutex can park a waiting thread in the kernel,
+    /// and a render thread that parks is a dropout. The critical sections here are all
+    /// a single field read or write.
+    private let callbackLock = OSAllocatedUnfairLock()
+    private var _onLevelUpdate: ((UUID, AudioLevel) -> Void)?
+    private var _onMasterLevelUpdate: ((AudioLevel) -> Void)?
+    private var _onStatusChange: ((AudioEngineStatus) -> Void)?
+    private var _onEffectRefused: ((String) -> Void)?
+    private var _onPlaybackInterrupted: ((String) -> Void)?
+    private var _onRecoveryRequired: (() -> Void)?
+    private var status: AudioEngineStatus = .recovering
+    private func withCallbackLock<T>(_ body: () -> T) -> T {
+        callbackLock.lock(); defer { callbackLock.unlock() }; return body()
+    }
+
+    // One acquisition per buffer instead of two. The taps used to read `telemetryPaused`
+    // and then the callback as separate properties, so each buffer took the lock twice on
+    // the render thread to answer one question: is there anywhere to send this level?
+    private func levelSink() -> ((UUID, AudioLevel) -> Void)? {
+        withCallbackLock { telemetryQuietLocked ? nil : _onLevelUpdate }
+    }
+
+    private func masterLevelSink() -> ((AudioLevel) -> Void)? {
+        withCallbackLock { telemetryQuietLocked ? nil : _onMasterLevelUpdate }
+    }
+
+    /// Caller holds callbackLock.
+    private var telemetryQuietLocked: Bool {
+        _telemetryPaused || _appInBackground || CACurrentMediaTime() < _telemetryQuietUntil
+    }
+    var onLevelUpdate: ((UUID, AudioLevel) -> Void)? {
+        get { withCallbackLock { _onLevelUpdate } }
+        set { withCallbackLock { _onLevelUpdate = newValue } }
+    }
+    var onMasterLevelUpdate: ((AudioLevel) -> Void)? {
+        get { withCallbackLock { _onMasterLevelUpdate } }
+        set { withCallbackLock { _onMasterLevelUpdate = newValue } }
+    }
+    var onStatusChange: ((AudioEngineStatus) -> Void)? {
+        get { withCallbackLock { _onStatusChange } }
+        set { withCallbackLock { _onStatusChange = newValue } }
+    }
+    /// An effect could not be connected in any format and was left out. On the main
+    /// thread, with the effect's name.
+    var onEffectRefused: ((String) -> Void)? {
+        get { withCallbackLock { _onEffectRefused } }
+        set { withCallbackLock { _onEffectRefused = newValue } }
+    }
+    var onPlaybackInterrupted: ((String) -> Void)? {
+        get { withCallbackLock { _onPlaybackInterrupted } }
+        set { withCallbackLock { _onPlaybackInterrupted = newValue } }
+    }
+    var onRecoveryRequired: (() -> Void)? {
+        get { withCallbackLock { _onRecoveryRequired } }
+        set { withCallbackLock { _onRecoveryRequired = newValue } }
+    }
+    var currentStatus: AudioEngineStatus { withCallbackLock { status } }
+    private var _telemetryPaused = false
+    /// Suspends VU metering and level callbacks. Set while a plugin's UI is being
+    /// constructed: hosting an out-of-process AUv3 view is main-thread and CoreAnimation
+    /// heavy, and a big plugin (GeoShred) can fail to establish its hosted scene while we
+    /// are also pushing 20 Hz meter updates per track. Audio and MIDI are unaffected.
+    var telemetryPaused: Bool {
+        get { withCallbackLock { _telemetryPaused } }
+        set { withCallbackLock { _telemetryPaused = newValue } }
+    }
+    /// The app is in the background: nothing is on screen, so meters are not measured
+    /// and playback telemetry is not sent, while audio plays on exactly as before.
+    private var _appInBackground = false
+    /// Telemetry is held off until this moment (CACurrentMediaTime), for a burst of
+    /// screen work such as a rotation. Self-expiring, so it can never be left on.
+    private var _telemetryQuietUntil: CFTimeInterval = 0
+
+    /// Hold meters and playback telemetry off for `seconds` — while the screen is being
+    /// laid out again after a rotation, so the meters are not competing with it for the
+    /// main thread. Audio and MIDI are unaffected.
+    func quietTelemetry(forSeconds seconds: Double) {
+        withCallbackLock { _telemetryQuietUntil = CACurrentMediaTime() + seconds }
+    }
+
+    /// Whether on-screen telemetry (meters, notes, steps) should be skipped right now —
+    /// a plugin UI is being built, the screen is being laid out again, or nobody can see it.
+    var telemetrySuppressed: Bool {
+        withCallbackLock { telemetryQuietLocked }
+    }
+    private var sessionObservers: [NSObjectProtocol] = []
+    /// Set once an effect load is settled, by the effect arriving or by its time limit.
+    private final class EffectLoadFlag { var isSet = false }
+
+    private struct PluginLoadRequest {
+        let id: UUID
+        let completion: (Result<Void, PluginLoadError>) -> Void
+    }
+    private var loadRequests: [UUID: PluginLoadRequest] = [:]
+
+    // All access to the node dictionaries and to a hosted AU's state/MIDI is serialised
+    // through this lock. The sequencer tick sends MIDI from a background queue while the
+    // main thread loads/swaps/removes instruments and reads plugin state — without it, a
+    // dictionary mutated during a concurrent read (or MIDI sent to a node mid-swap) is a
+    // hard crash. Recursive so a locked method can safely call another.
+    /// How long a newly instantiated AUv3 is left alone before it is sent MIDI (and
+    /// before saved state is restored). Covers the extension building its DSP; sending
+    /// MIDI inside this window crashes fragile plugins.
+    ///
+    /// 1.0 s — the value the codebase used throughout the period plugin hosting was
+    /// working, kept for its original purpose: many AUv3s need a runloop cycle after
+    /// being attached before they will accept `fullState`/`fullStateForDocument`.
+    ///
+    /// It is NOT a crash mitigation, despite having been raised to 4.0 s while chasing
+    /// one. Crash times tracked this value almost exactly (1.0 s → died 4.1 s after the
+    /// extension launched; 4.0 s → died 7.6 s), i.e. the plugin always died on the first
+    /// MIDI event it received, whenever that arrived. The actual causes were our own
+    /// all-notes-off flush and an unbalanced MIDI-gate release, both since fixed — so
+    /// there is nothing to buy by inflating this, only slower instrument loads.
+    /// How long a plugin may take to load before its track falls back to the built-in
+    /// sound. Was 15 s; raised to 30 s on 2026-11-19 after a slow plugin missed it on
+    /// Graham's iPad. Longer only costs waiting when a plugin really is broken.
+    static let pluginLoadTimeout: Double = 30
+
+    static let instrumentSettleDelay: TimeInterval = 1.0
+
+    private let auLock = NSRecursiveLock()
+    private func withLock<T>(_ body: () -> T) -> T {
+        auLock.lock(); defer { auLock.unlock() }; return body()
+    }
+    // Tracks whose instrument is mid-load/swap/restore. MIDI to a suspended track is
+    // dropped so the tick can't hit a half-attached node or a not-yet-restored preset.
+    //
+    // REFERENCE COUNTED, deliberately. Suspension has independent owners — a plugin
+    // load, and the open plugin editor — and with a plain flag whichever one resumed
+    // first opened the gate for everyone. That is a real crash: closing the editor
+    // during a load cleared the load's suspend, and a note-on reached GeoShred before
+    // its extension had finished instantiating: a note-on was delivered before the
+    // instantiate callback had even returned. Each owner must balance its own
+    // suspend/resume; the gate lifts only when the last one releases.
+    private var suspendCounts: [UUID: Int] = [:]
+    private func isSuspended(_ id: UUID) -> Bool { suspendCounts[id] != nil }
+    /// Instruments that have finished their settle window and may be sent MIDI. An AUv3
+    /// is NOT in this set between attach and the end of `instrumentSettleDelay`.
+    ///
+    /// This gates the all-notes-off flushes too, which bypass `suspended` because they
+    /// call `sendMIDI` directly. That matters: a flush is 129 MIDI events, and delivering
+    /// even one to an unsettled plugin crashes it (GeoShred:
+    /// `PerformanceHandler_runMidiEvent` on a null handler) — which happened just by
+    /// opening its editor, with the sequencer stopped. Skipping the flush is always safe
+    /// for an unsettled unit: MIDI was gated the whole time, so it has no ringing notes.
+    private var settledInstruments: Set<UUID> = []
+    /// Instruments whose sound may differ from what the song has saved: a plugin chosen
+    /// fresh (no saved state), or one whose editor has been opened since it loaded.
+    /// An instrument restored from the song and never opened is NOT here, and the
+    /// automatic captures (pause, stop, leaving, backgrounding) leave its saved state
+    /// alone. Graham, 2026-11-19: after killing the app, saved patches on tracks he had
+    /// not touched came back as defaults. A plugin that ignores the restore (not ready
+    /// yet, typically on a cold start with every extension launching at once) plays its
+    /// default, and the next automatic capture used to save that default over the
+    /// user's patch. Now the patch survives, and reopening the song restores it again.
+    private var instrumentsWithNewState: Set<UUID> = []
+
+    /// The editor is opening, so the user may change the sound: from now on the
+    /// automatic captures record this instrument too.
+    func noteEditorOpened(for id: UUID) {
+        withLock { _ = instrumentsWithNewState.insert(id) }
+    }
+
+    /// Whether an automatic capture may replace this instrument's saved state.
+    func mayHaveNewState(_ id: UUID) -> Bool {
+        withLock { instrumentsWithNewState.contains(id) }
+    }
+    /// Notes currently sounding per track, so a quiesce can send note-offs ONLY for
+    /// what is actually ringing. Previously every suspend blasted 128 note-offs + CC123
+    /// at the plugin; opening GeoShred's editor did exactly that and killed it
+    /// (first event `80 00 00`). With nothing ringing this now sends nothing at all.
+    private var activeNotes: [UUID: Set<UInt8>] = [:]
+
+    /// Gate MIDI to a track and silence anything ringing on it. Call around a plugin
+    /// swap/restore; balance with `resumeTrack`.
+    func suspendTrack(_ id: UUID) {
+        withLock {
+            suspendCounts[id, default: 0] += 1
+            stopAllNotesLocked(on: id)
+        }
+    }
+
+    func resumeTrack(_ id: UUID) {
+        withLock {
+            guard let count = suspendCounts[id] else { return }   // ignore unbalanced resume
+            if count <= 1 { suspendCounts.removeValue(forKey: id) }
+            else { suspendCounts[id] = count - 1 }
+        }
+    }
+
+    // Caller must hold auLock.
+    private func stopAllNotesLocked(on id: UUID) {
+        let ringing = activeNotes[id] ?? []
+        activeNotes[id] = []
+        guard !ringing.isEmpty else { return }   // nothing sounding → send NOTHING
+        if let unit = auv3Units[id] {
+            // Never address an unsettled plugin (see settledInstruments), and only ever
+            // release notes we actually started. A blanket 0...127 sweep is 129 MIDI
+            // events into a plugin that may not tolerate them.
+            guard settledInstruments.contains(id) else { return }
+            for n in ringing { sendMIDI(to: unit, 0x80, n, 0) }
+        } else if let sampler = samplers[id] {
+            for n in ringing { sampler.stopNote(n, onChannel: 0) }
+        }
+    }
+
+    init() {
+        registerForAudioSessionEvents()
+        do {
+            try configureAudioSession()
+            configureMasterGraph()
+            setStatus(.ready)
+        } catch {
+            setStatus(.failed(error.localizedDescription))
+        }
+    }
+
+    deinit {
+        for observer in sessionObservers { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    private func configureAudioSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        // Instrument plugins (MIDI in, audio out) never need audio input, so use the
+        // lighter, higher-quality .playback category instead of .playAndRecord — the
+        // record path adds overhead and a more glitch-prone route, and .playback gets
+        // full-quality Bluetooth (A2DP) rather than call-grade HFP.
+        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        // Give the render callback more time per buffer. Hosting a CPU-heavy, disk-
+        // streaming sampled instrument (e.g. Ravenscroft piano) overruns a small buffer,
+        // producing crackle even at low levels (distinct from clipping). ~23 ms is a
+        // stable size; latency is still fine for sequenced playback and live keys.
+        try session.setPreferredIOBufferDuration(0.023)
+        try session.setActive(true)
+    }
+
+    private func configureMasterGraph() {
+        // No master effect on the output bus. A master AUPeakLimiter here transiently
+        // clamps and adds CPU on the mix bus, which produces audible crackle on heavy
+        // sampled instruments (e.g. the Ravenscroft piano) — distinct from clipping.
+        // Connect the mix straight to the output. Do this explicitly rather than relying
+        // on mainMixerNode's lazy auto-connection, which did not establish the output
+        // path here (removing the limiter left the mix with nowhere to go → silence).
+        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
+    }
+
+    private func setStatus(_ newStatus: AudioEngineStatus) {
+        withCallbackLock { status = newStatus }
+        DispatchQueue.main.async { [weak self] in self?.onStatusChange?(newStatus) }
+    }
+
+    private func deliver(_ result: Result<Void, PluginLoadError>,
+                         to completion: @escaping (Result<Void, PluginLoadError>) -> Void) {
+        // ALWAYS asynchronous, even when already on the main thread. Several load paths
+        // complete synchronously (no plugin, unavailable track, a superseded request),
+        // and choosing an instrument happens inside a SwiftUI binding setter — so a
+        // synchronous completion mutated @Published state (isLoading, pluginStatuses,
+        // notice) during a view update: "Publishing changes from within view updates is
+        // not allowed, this will cause undefined behavior."
+        DispatchQueue.main.async { completion(result) }
+    }
+
+    private func startEngineIfNeeded() -> Bool {
+        guard !engine.isRunning else { return true }
+        do {
+            try engine.start()
+            setStatus(.ready)
+            return true
+        } catch {
+            setStatus(.failed(error.localizedDescription))
+            return false
+        }
+    }
+
+    /// Make sure audio is running before playback starts.
+    ///
+    /// An interruption pauses the engine, and it is only restarted by itself when the
+    /// system says playback should resume. When it does not say so (the other audio
+    /// simply ended), the engine stayed paused and pressing Play was silent until the
+    /// song was reopened. Does nothing while the engine is running, which is every
+    /// ordinary press of Play. A failure here is left for the interruption handling to
+    /// report: this must never turn a silent Play into an error message.
+    func ensureRunning() {
+        withLock {
+            guard !engine.isRunning, !trackMixers.isEmpty else { return }
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+                try engine.start()
+                setStatus(.ready)
+            } catch {
+                NSLog("[FWD] Audio could not be restarted before playing: %@", error.localizedDescription)
+            }
+        }
+    }
+
+    private func registerForAudioSessionEvents() {
+        let center = NotificationCenter.default
+        let session = AVAudioSession.sharedInstance()
+
+        sessionObservers.append(center.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] note in
+            self?.handleInterruption(note)
+        })
+        sessionObservers.append(center.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] note in
+            self?.handleRouteChange(note)
+        })
+        // Background playback carries on; only the on-screen telemetry stops.
+        sessionObservers.append(center.addObserver(
+            // Named by string: UIApplication's constants are main-actor isolated, and this
+            // class is not.
+            forName: Notification.Name("UIApplicationDidEnterBackgroundNotification"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.withCallbackLock { self?._appInBackground = true }
+        })
+        sessionObservers.append(center.addObserver(
+            forName: Notification.Name("UIApplicationWillEnterForegroundNotification"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.withCallbackLock { self?._appInBackground = false }
+        })
+        sessionObservers.append(center.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] _ in
+            self?.rebuildAfterMediaServicesReset()
+        })
+        // Required by AVAudioEngine: when the hardware configuration changes (a new
+        // route, a different sample rate, an AUv3 renegotiating its format) the engine
+        // stops itself and tears down the connections around the output node. The host
+        // MUST rebuild them; without this the mix has nowhere to go and the app goes
+        // silent until the song is reopened. Observed with `object: nil` on purpose —
+        // `engine` is REPLACED wholesale by rebuildAfterMediaServicesReset(), so an
+        // observer bound to the instance alive at registration would go deaf after a
+        // media-services reset. The handler checks the sender instead.
+        sessionObservers.append(center.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            self?.handleConfigurationChange(note)
+        })
+    }
+
+    /// Rebuild the mix path after AVAudioEngine tears it down.
+    ///
+    /// Deliberately reconnects only the in-process mixer plumbing — every track mixer
+    /// into the main mixer, and the main mixer into the output. The instrument → track
+    /// mixer connections are left ALONE: `AVAudioMixerNode` converts its inputs, so a
+    /// changed hardware sample rate needs no renegotiation there, and disconnecting an
+    /// out-of-process AUv3 would force its render resources to be reallocated behind its
+    /// back — the same class of interference that produced blank UIs and lost state
+    /// elsewhere in this file.
+    private func handleConfigurationChange(_ notification: Notification) {
+        withLock {
+            guard let sender = notification.object as? AVAudioEngine, sender === engine else { return }
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
+            for (_, mixer) in trackMixers {
+                engine.connect(mixer, to: engine.mainMixerNode, format: nil)
+            }
+            installMasterTap()
+            _ = startEngineIfNeeded()
+        }
+    }
+
+    private func handleInterruption(_ notification: Notification) {
+        guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+
+        switch type {
+        case .began:
+            allNotesOff()
+            engine.pause()
+            setStatus(.interrupted)
+            onPlaybackInterrupted?("Playback paused because audio was interrupted.")
+        case .ended:
+            let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
+            guard options.contains(.shouldResume) else {
+                setStatus(.interrupted)
+                return
+            }
+            do {
+                try configureAudioSession()
+                _ = startEngineIfNeeded()
+            } catch {
+                setStatus(.failed(error.localizedDescription))
+            }
+        @unknown default:
+            setStatus(.interrupted)
+        }
+    }
+
+    private func handleRouteChange(_ notification: Notification) {
+        guard let raw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: raw),
+              reason == .oldDeviceUnavailable else { return }
+        allNotesOff()
+        onPlaybackInterrupted?("Playback paused because the audio output changed.")
+    }
+
+    private func rebuildAfterMediaServicesReset() {
+        setStatus(.recovering)
+        let cancelled = withLock { () -> [(Result<Void, PluginLoadError>) -> Void] in
+            engine.stop()
+            samplers.removeAll()
+            auv3Units.removeAll()
+            effectUnits.removeAll()
+            bypassedUnits.removeAll()
+            refusedUnits.removeAll()
+            effectAdapters.removeAll()
+            trackMixers.removeAll()
+            suspendCounts.removeAll()
+            // Must go with the units themselves. A track left in the settled set has no
+            // instrument behind it, and would be treated as safe to address the moment a
+            // new one is keyed to the same track id.
+            settledInstruments.removeAll()
+            activeNotes.removeAll()
+            let completions = loadRequests.values.map(\.completion)
+            loadRequests.removeAll()
+            engine = AVAudioEngine()
+            masterTapInstalled = false
+            return completions
+        }
+        cancelled.forEach { deliver(.failure(.cancelled), to: $0) }
+
+        do {
+            try configureAudioSession()
+            configureMasterGraph()
+            setStatus(.ready)
+            onRecoveryRequired?()
+        } catch {
+            setStatus(.failed(error.localizedDescription))
+        }
+    }
+
+    func setMasterVolume(_ volume: Float) {
+        engine.mainMixerNode.outputVolume = volume
+    }
+
+    private func installMasterTap() {
+        guard !masterTapInstalled else { return }
+        let main = engine.mainMixerNode
+        guard main.numberOfInputs > 0 else { return }
+        var lastLevelTimestamp: Double = 0
+        main.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+            guard let self else { return }
+            // Metering is throttled and pausable.
+            let now = CACurrentMediaTime()
+            guard now - lastLevelTimestamp > 0.05 else { return }
+            lastLevelTimestamp = now
+            guard let sink = self.masterLevelSink() else { return }
+            sink(self.levels(buffer))
+        }
+        masterTapInstalled = true
+    }
+
+    func addTrack(id: UUID, volume: Float = 0.8, pan: Float = 0.0, builtInSound: Int = 0) {
+        withLock {
+            builtInSounds[id] = builtInSound
+            guard samplers[id] == nil, auv3Units[id] == nil else { return }
+            let sampler = AVAudioUnitSampler()
+            let mixerNode = AVAudioMixerNode()
+            engine.attach(sampler)
+            engine.attach(mixerNode)
+            // Set volume/pan BEFORE connecting so the node enters the mix at the correct level
+            mixerNode.volume = volume
+            mixerNode.pan = pan
+            engine.connect(sampler, to: mixerNode, format: nil)
+            engine.connect(mixerNode, to: engine.mainMixerNode, format: nil)
+            loadGMBank(sampler, sound: builtInSound)
+            samplers[id] = sampler
+            trackMixers[id] = mixerNode
+            settledInstruments.insert(id)   // GM sampler is in-process, always safe
+            if !engine.isRunning {
+                _ = startEngineIfNeeded()
+                installMasterTap()
+            }
+            installLevelTap(id: id, node: mixerNode)
+        }
+    }
+
+    // MARK: - Effects
+    //
+    // Written for a chain of N even though the UI offers one (SongTrack.maximumEffects),
+    // so raising that limit needs no change here.
+
+    /// Instantiate an effect and insert it at `index` in the track's chain.
+    ///
+    /// The track's MIDI is suspended for the duration: instantiating is asynchronous and
+    /// rebuilding the graph disconnects the instrument mid-flight, which is exactly the
+    /// window that has crashed fragile plugins before (see PLUGIN_HOSTING.md §2).
+    /// `bypassed` is applied here rather than by a separate call afterwards, because
+    /// instantiating is asynchronous: a caller that sets it on the next line is setting it
+    /// on a chain that is still empty, and the flag is silently dropped.
+    func loadEffect(_ pluginInfo: PluginInfo, at index: Int, for trackID: UUID,
+                    stateData: Data? = nil, bypassed: Bool = false,
+                    completion: @escaping (Result<Void, PluginLoadError>) -> Void = { _ in }) {
+        let desc = AudioComponentDescription(
+            componentType: pluginInfo.componentType,
+            componentSubType: pluginInfo.componentSubType,
+            componentManufacturer: pluginInfo.componentManufacturer,
+            componentFlags: 0, componentFlagsMask: 0
+        )
+        suspendTrack(trackID)
+        // Whichever comes first, the effect or the time limit, settles this load; the
+        // other is turned away. Without a limit, an effect whose extension never
+        // answered left the track's MIDI gated for good (Graham, 2026-11-19). Both run
+        // on the main thread, so a plain flag is enough.
+        let settled = EffectLoadFlag()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pluginLoadTimeout) { [weak self] in
+            guard let self, !settled.isSet else { return }
+            settled.isSet = true
+            self.resumeTrack(trackID)
+            self.deliver(.failure(.effectTimedOut(pluginInfo.name)), to: completion)
+        }
+        AVAudioUnit.instantiate(with: desc, options: []) { [weak self] avAudioUnit, error in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                // Too late: the time limit already gave up on it. Not attached.
+                guard !settled.isSet else { return }
+                settled.isSet = true
+                defer { self.resumeTrack(trackID) }
+                guard let unit = avAudioUnit else {
+                    let detail = error?.localizedDescription ?? "The Audio Unit returned no effect."
+                    self.deliver(.failure(.instantiationFailed(pluginInfo.name, detail)), to: completion)
+                    return
+                }
+                self.withLock {
+                    self.engine.attach(unit)
+                    var chain = self.effectUnits[trackID] ?? []
+                    chain.insert(unit, at: min(max(0, index), chain.count))
+                    self.effectUnits[trackID] = chain
+                    // Registered before the rebuild below, so a saved bypass never has an
+                    // audible gap where the effect is briefly in circuit.
+                    if bypassed { self.bypassedUnits.insert(ObjectIdentifier(unit)) }
+                    unit.auAudioUnit.shouldBypassEffect = bypassed
+                    self.rebuildChainLocked(for: trackID)
+                    _ = self.startEngineIfNeeded()
+                }
+                // Same settle rationale as an instrument: many AUv3s will not accept
+                // fullState until a runloop turn after being attached.
+                if let stateData {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Self.instrumentSettleDelay) {
+                        self.withLock {
+                            // The unit itself, not whatever is at `index` by now: the
+                            // chain can be reordered, or the effect removed, during
+                            // the settle delay.
+                            guard let chain = self.effectUnits[trackID],
+                                  chain.contains(where: { $0 === unit }) else { return }
+                            self.applyPluginStateLocked(stateData, to: unit)
+                        }
+                        self.deliver(.success(()), to: completion)
+                    }
+                } else {
+                    self.deliver(.success(()), to: completion)
+                }
+            }
+        }
+    }
+
+    /// Reorder the chain, matching the move semantics the list UI uses so the graph and
+    /// the model cannot disagree about what an order means.
+    ///
+    /// Spelled out rather than calling `move(fromOffsets:toOffset:)`, which comes from
+    /// SwiftUI — the audio layer has no business importing it. `destination` indexes the
+    /// array BEFORE anything is removed, hence the adjustment.
+    func moveEffect(from source: IndexSet, to destination: Int, for trackID: UUID) {
+        suspendTrack(trackID)
+        defer { resumeTrack(trackID) }
+        withLock {
+            guard let chain = effectUnits[trackID], !chain.isEmpty else { return }
+            let moving = source.sorted().compactMap { chain.indices.contains($0) ? chain[$0] : nil }
+            guard !moving.isEmpty else { return }
+            var remaining = chain.enumerated()
+                .filter { !source.contains($0.offset) }
+                .map(\.element)
+            let insertAt = destination - source.filter { $0 < destination }.count
+            remaining.insert(contentsOf: moving, at: min(max(0, insertAt), remaining.count))
+            effectUnits[trackID] = remaining
+            rebuildChainLocked(for: trackID)
+        }
+    }
+
+    func removeEffect(at index: Int, for trackID: UUID) {
+        suspendTrack(trackID)
+        defer { resumeTrack(trackID) }
+        withLock {
+            guard var chain = effectUnits[trackID], chain.indices.contains(index) else { return }
+            let unit = chain.remove(at: index)
+            effectUnits[trackID] = chain
+            bypassedUnits.remove(ObjectIdentifier(unit))
+            refusedUnits.remove(ObjectIdentifier(unit))
+            engine.disconnectNodeOutput(unit)
+            engine.detach(unit)
+            rebuildChainLocked(for: trackID)
+        }
+    }
+
+    /// Bypass by rewiring the chain around the effect, not by asking it to bypass itself.
+    ///
+    /// `shouldBypassEffect` is advisory: the AU has to read it in its own render block,
+    /// and plenty do not — AudioKit's rack reverb ignores it completely, which is how
+    /// this was found. A host that only sets the flag has a bypass switch that works on
+    /// some plugins and silently does nothing on others.
+    ///
+    /// The flag is still set, for the AUs that do honour it: those can ring a reverb tail
+    /// out rather than having it cut, and it costs nothing where it is ignored.
+    ///
+    /// This reverses an earlier decision to keep a bypassed effect in the graph so its
+    /// latency stayed in the sum and toggling could not shift the track in time. That
+    /// preserved timing at the cost of the feature not working, which is the wrong trade:
+    /// an unplugged effect no longer delays the track, so its compensation must go too.
+    func setEffectBypassed(_ bypassed: Bool, at index: Int, for trackID: UUID) {
+        suspendTrack(trackID)
+        defer { resumeTrack(trackID) }
+        withLock {
+            guard let chain = effectUnits[trackID], chain.indices.contains(index) else { return }
+            let unit = chain[index]
+            if bypassed { bypassedUnits.insert(ObjectIdentifier(unit)) }
+            else { bypassedUnits.remove(ObjectIdentifier(unit)) }
+            unit.auAudioUnit.shouldBypassEffect = bypassed
+            rebuildChainLocked(for: trackID)
+        }
+    }
+
+    func effectUnit(at index: Int, for trackID: UUID) -> AVAudioUnit? {
+        withLock {
+            guard let chain = effectUnits[trackID], chain.indices.contains(index) else { return nil }
+            return chain[index]
+        }
+    }
+
+    /// Capture an effect's state, with the track quiesced — same reasoning as
+    /// `captureState` for an instrument.
+    func captureEffectState(at index: Int, for trackID: UUID) -> Data? {
+        suspendTrack(trackID)
+        defer { resumeTrack(trackID) }
+        return withLock {
+            guard let chain = effectUnits[trackID], chain.indices.contains(index) else { return nil }
+            return getPluginStateLocked(from: chain[index])
+        }
+    }
+
+    private func detachEffectsLocked(for trackID: UUID) {
+        for unit in effectUnits.removeValue(forKey: trackID) ?? [] {
+            bypassedUnits.remove(ObjectIdentifier(unit))
+            refusedUnits.remove(ObjectIdentifier(unit))
+            engine.disconnectNodeOutput(unit)
+            engine.detach(unit)
+        }
+    }
+
+    func hasInstrument(for id: UUID) -> Bool {
+        withLock { auv3Units[id] != nil || samplers[id] != nil }
+    }
+
+    func removeTrack(id: UUID) {
+        var cancelled: ((Result<Void, PluginLoadError>) -> Void)?
+        withLock {
+            suspendCounts.removeValue(forKey: id)
+            settledInstruments.remove(id)
+            instrumentsWithNewState.remove(id)
+            cancelled = loadRequests.removeValue(forKey: id)?.completion
+            if let mixer = trackMixers.removeValue(forKey: id) {
+                mixer.removeTap(onBus: 0)
+                engine.detach(mixer)
+            }
+            detachEffectsLocked(for: id)
+            if let auv3 = auv3Units.removeValue(forKey: id) {
+                // No deallocateRenderResources() here either — see retireInstrument.
+                engine.detach(auv3)
+            }
+            if let sampler = samplers.removeValue(forKey: id) {
+                engine.detach(sampler)
+            }
+        }
+        if let cancelled { deliver(.failure(.cancelled), to: cancelled) }
+    }
+
+    // Swap the instrument on a track. Completion fires only after state restoration or
+    // fallback, allowing the UI to reflect real readiness instead of a fixed delay.
+    func loadPlugin(_ pluginInfo: PluginInfo?, for trackID: UUID, stateData: Data? = nil,
+                    completion: @escaping (Result<Void, PluginLoadError>) -> Void = { _ in }) {
+        let requestID = UUID()
+        let result: (mixer: AVAudioMixerNode?, cancelled: ((Result<Void, PluginLoadError>) -> Void)?) = withLock {
+            let oldCompletion = loadRequests.removeValue(forKey: trackID)?.completion
+            // The incoming instrument is unsettled until its settle window completes.
+            settledInstruments.remove(trackID)
+            // Restored from the song: its saved state stands until the editor is opened.
+            // Chosen fresh: nothing saved to protect, captured as before.
+            if stateData == nil { instrumentsWithNewState.insert(trackID) }
+            else { instrumentsWithNewState.remove(trackID) }
+            guard let mixer = trackMixers[trackID] else { return (nil, oldCompletion) }
+            loadRequests[trackID] = PluginLoadRequest(id: requestID, completion: completion)
+            return (mixer, oldCompletion)
+        }
+        if let cancelled = result.cancelled { deliver(.failure(.cancelled), to: cancelled) }
+        guard let mixer = result.mixer else {
+            // A load that was still running held a suspend of its own; it will never
+            // finish now, so give it back.
+            if result.cancelled != nil { resumeTrack(trackID) }
+            deliver(.failure(.trackUnavailable), to: completion)
+            return
+        }
+
+
+        // Gate MIDI to this track until the new instrument is attached (and its state
+        // restored). Prevents the tick from hitting a half-attached node mid-swap.
+        suspendTrack(trackID)
+        // A load still running when this one started took a suspend that only its own
+        // finish would give back — and a superseded load never finishes (isCurrentLoad
+        // turns it away). So it is handed back here, after this load's own suspend, so
+        // the gate never opens in between. Without this, choosing another instrument (or
+        // Reload) while one was still loading left the track's MIDI gated for good: no
+        // keys, no sequencer, until the song was closed (Graham, 2026-11-19).
+        if result.cancelled != nil { resumeTrack(trackID) }
+
+        if let pluginInfo {
+            let desc = AudioComponentDescription(
+                componentType: pluginInfo.componentType,
+                componentSubType: pluginInfo.componentSubType,
+                componentManufacturer: pluginInfo.componentManufacturer,
+                componentFlags: 0,
+                componentFlagsMask: 0
+            )
+            AVAudioUnit.instantiate(with: desc, options: []) { [weak self] avAudioUnit, error in
+                guard let self else { return }
+                DispatchQueue.main.async {
+                    guard self.isCurrentLoad(requestID, for: trackID) else { return }
+                    if let unit = avAudioUnit {
+                        self.swapInstrument(unit, for: trackID, mixer: mixer)
+                        if let data = stateData {
+                            // Wait a runloop cycle or so before restoring: many AUv3s
+                            // will not accept fullState immediately after being attached.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + Self.instrumentSettleDelay) {
+                                guard self.isCurrentLoad(requestID, for: trackID) else { return }
+                                self.applyPluginState(data, for: trackID)
+                                self.finishPluginLoad(requestID, for: trackID, result: .success(()))
+                            }
+                        } else {
+                            // Nothing to restore, so nothing to wait for — a fresh
+                            // instrument is ready as soon as it is attached. Hand off on
+                            // the NEXT runloop turn rather than this one, so the graph
+                            // change is applied before MIDI is allowed through again.
+                            DispatchQueue.main.async {
+                                guard self.isCurrentLoad(requestID, for: trackID) else { return }
+                                self.finishPluginLoad(requestID, for: trackID, result: .success(()))
+                            }
+                        }
+                    } else {
+                        let detail = error?.localizedDescription ?? "The Audio Unit returned no instrument."
+                        self.attachSampler(for: trackID, mixer: mixer)
+                        self.finishPluginLoad(
+                            requestID, for: trackID,
+                            result: .failure(.instantiationFailed(pluginInfo.name, detail))
+                        )
+                    }
+                }
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.pluginLoadTimeout) { [weak self] in
+                guard let self, isCurrentLoad(requestID, for: trackID) else { return }
+                attachSampler(for: trackID, mixer: mixer)
+                finishPluginLoad(requestID, for: trackID,
+                                 result: .failure(.timedOut(pluginInfo.name)))
+            }
+        } else {
+            attachSampler(for: trackID, mixer: mixer)
+            finishPluginLoad(requestID, for: trackID, result: .success(()))
+        }
+    }
+
+    private func isCurrentLoad(_ requestID: UUID, for trackID: UUID) -> Bool {
+        withLock { loadRequests[trackID]?.id == requestID && trackMixers[trackID] != nil }
+    }
+
+    private func finishPluginLoad(_ requestID: UUID, for trackID: UUID,
+                                  result: Result<Void, PluginLoadError>) {
+        let completion = withLock { () -> ((Result<Void, PluginLoadError>) -> Void)? in
+            guard loadRequests[trackID]?.id == requestID else { return nil }
+            // The settle window has elapsed (or a GM sampler took over, which is
+            // in-process and always safe): MIDI, including flushes, may flow again.
+            settledInstruments.insert(trackID)
+            return loadRequests.removeValue(forKey: trackID)?.completion
+        }
+        guard let completion else { return }
+        resumeTrack(trackID)
+        deliver(result, to: completion)
+    }
+
+    // Return the live AVAudioUnit for a track (nil if using GM sampler).
+    func auv3Unit(for id: UUID) -> AVAudioUnit? { withLock { auv3Units[id] } }
+
+    // Serialise the plugin's current full state (preset + parameters) to Data.
+    // Strategy:
+    //   1. fullStateForDocument / fullState (non-empty) — standard AUv3 plugins
+    //   2. parameterTree values + currentPreset — AudioKit and other plugins that
+    //      return nil or an empty dict from fullState
+    func getPluginState(for id: UUID) -> Data? {
+        withLock { getPluginStateLocked(for: id) }
+    }
+
+    /// Read plugin state with the track briefly quiesced — MIDI gated and ringing notes
+    /// flushed — so the read can't race an in-flight note-on. Use this for capture.
+    /// (Do not call during a plugin load; the load already owns the suspend for that track.)
+    func captureState(for id: UUID) -> Data? {
+        suspendTrack(id)
+        defer { resumeTrack(id) }
+        return getPluginState(for: id)
+    }
+
+    /// Stable identity of the audio component backing a unit. Saved alongside plugin
+    /// state so a blob captured from one plugin is never restored into another.
+    private func componentIdentifier(for unit: AVAudioUnit) -> String {
+        let d = unit.audioComponentDescription
+        return "\(d.componentType)-\(d.componentSubType)-\(d.componentManufacturer)"
+    }
+
+    private func getPluginStateLocked(for id: UUID) -> Data? {
+        guard let unit = auv3Units[id] else { return nil }
+        return getPluginStateLocked(from: unit)
+    }
+
+    /// State capture works on any hosted unit — an instrument or an effect. The logic
+    /// below never cared which; it only ever needed the unit.
+    private func getPluginStateLocked(from unit: AVAudioUnit) -> Data? {
+        let au = unit.auAudioUnit
+
+        // Read the document state first; only fall back to fullState if it's absent.
+        // Reading BOTH (and re-reading currentPreset) on every save makes the host poke
+        // the plugin's state/preset machinery repeatedly, which can crash fragile plugins
+        // (GeoShred's extension drops its connection "while in use"). One read is enough.
+        let fsd = au.fullStateForDocument
+        let isDocument = (fsd != nil)
+        let state = fsd ?? au.fullState
+
+        // Use PropertyListSerialization — handles NSData/NSString/NSNumber/NSDictionary
+        // natively without the type-allowlist issues of NSKeyedUnarchiver.
+        var combined: [String: Any] = [:]
+
+        // Is fullState a COMPLETE preset, or only metadata?
+        //
+        // Apple's preset dictionary is documented as type / subtype / manufacturer /
+        // version plus a `data` payload holding the plugin's own serialised state. If
+        // that payload is present and non-empty, fullState is authoritative and the
+        // parameter tree must not be saved or re-applied over it.
+        //
+        // This previously tested `state.count > 5`, which is exactly backwards for a
+        // well-behaved plugin: the canonical complete dictionary has precisely those
+        // five keys, so a correct plugin (GeoShred among them) was classified as
+        // "metadata only" and had its entire parameter tree written back over a
+        // perfectly good restore — hundreds of individual parameter writes, each able
+        // to trigger internal recalculation.
+        //
+        // The payload test is the primary rule, but a plugin that stores its state in
+        // its own custom keys rather than a `data` blob is authoritative too, so the
+        // old key-count heuristic is kept as a secondary signal. Only genuinely sparse
+        // states — AudioKit's name/version-only dictionaries — fall through to the tree.
+        let stateIsAuthoritative: Bool
+        if let state, !state.isEmpty {
+            combined["_fullState"] = state
+            // Record which property the state came from so restore writes back to the
+            // SAME one — setting both can corrupt synths that distinguish document state.
+            combined["_fullStateIsDocument"] = isDocument
+            let payload = state[kAUPresetDataKey] as? Data
+            let hasStatePayload = !(payload?.isEmpty ?? true)
+            stateIsAuthoritative = hasStatePayload || state.count > 5
+        } else {
+            stateIsAuthoritative = false
+        }
+
+        // Only walk the parameter tree when it is actually needed. Enumerating every
+        // parameter is expensive on a large instrument and pokes the plugin's parameter
+        // machinery on every autosave for no benefit.
+        if !stateIsAuthoritative, let params = au.parameterTree?.allParameters, !params.isEmpty {
+            var paramDict: [String: Double] = [:]
+            for p in params { paramDict["\(p.address)"] = Double(p.value) }
+            combined["_parameterTree"] = paramDict
+        }
+
+        // Tell the restore path whether parameterTree is needed. A fullState carrying a
+        // data payload is authoritative and the tree must never overwrite it.
+        combined["_parameterTreeRequired"] = !stateIsAuthoritative
+
+        // Which plugin this state came from, so restore can reject a foreign blob.
+        combined["_componentIdentifier"] = componentIdentifier(for: unit)
+
+        guard !combined.isEmpty else { return nil }
+        return try? PropertyListSerialization.data(
+            fromPropertyList: combined,
+            format: .binary,
+            options: 0
+        )
+    }
+
+    // Restore a previously serialised plugin state.
+    func applyPluginState(_ data: Data, for id: UUID) {
+        withLock { applyPluginStateLocked(data, for: id) }
+    }
+
+    private func applyPluginStateLocked(_ data: Data, for id: UUID) {
+        guard let unit = auv3Units[id] else { return }
+        applyPluginStateLocked(data, to: unit)
+    }
+
+    private func applyPluginStateLocked(_ data: Data, to unit: AVAudioUnit) {
+        let au = unit.auAudioUnit
+
+        // Try plist format first (current), fall back to legacy NSKeyedArchiver format.
+        let outer: [String: Any]
+        if let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] {
+            outer = plist
+        } else if let legacy = try? NSKeyedUnarchiver.unarchivedObject(
+            ofClasses: [NSDictionary.self, NSArray.self, NSString.self, NSNumber.self, NSData.self],
+            from: data) as? [String: Any] {
+            outer = legacy
+        } else {
+            return
+        }
+
+        // Never restore a blob captured from a DIFFERENT plugin. Songs saved while the
+        // instrument-swap bug was live paired a new plugin with the old plugin's state;
+        // writing that foreign fullState / parameter addresses can leave the synth
+        // silent. Skipping leaves the plugin at its own defaults, and the next capture
+        // overwrites the bad blob. Legacy saves have no identifier → applied as before.
+        if let saved = outer["_componentIdentifier"] as? String,
+           saved != componentIdentifier(for: unit) {
+            return
+        }
+
+        // Apply fullState — authoritative for plugins like EG Pulse that store all
+        // sound data here (pad volumes, patterns, etc.).
+        if let state = outer["_fullState"] as? [String: Any] {
+            // Restore to the SAME property the state was captured from. Writing both
+            // can corrupt complex synths (GeoShred). Legacy saves (no flag) fall back
+            // to the old set-both behaviour for compatibility.
+            if let isDocument = outer["_fullStateIsDocument"] as? Bool {
+                if isDocument {
+                    au.fullStateForDocument = state
+                } else {
+                    au.fullState = state
+                }
+            } else {
+                au.fullStateForDocument = state
+                au.fullState = state
+            }
+        }
+
+        // Only apply parameterTree when flagged as required (AudioKit-style plugins
+        // where fullState is sparse metadata and the tree holds the real sound state).
+        // Skipping this for plugins with substantial fullState prevents the tree from
+        // overwriting values that fullState already restored correctly.
+        let paramTreeRequired = outer["_parameterTreeRequired"] as? Bool ?? true
+        if paramTreeRequired,
+           let paramDict = outer["_parameterTree"] as? [String: Double],
+           let tree = au.parameterTree {
+            for p in tree.allParameters {
+                if let value = paramDict["\(p.address)"] { p.value = AUValue(value) }
+            }
+        }
+    }
+
+    /// Remove whatever instrument currently feeds `mixer` for this track.
+    ///
+    /// An AUv3 is disconnected and detached, and released synchronously.
+    ///
+    /// Deliberately does NOT call `deallocateRenderResources()` on the outgoing unit.
+    /// Tearing an out-of-process AU's render resources down immediately before another
+    /// is instantiated left the INCOMING plugin's hosted view blank: swapping
+    /// instrument -> GeoShred failed every time, while GeoShred on a fresh track — which
+    /// retires only the in-process GM sampler below — always worked. Build 13, the last
+    /// known-good build, never called it either.
+    ///
+    /// Nor is the release deferred to "outlive the render cycle": that overlaps the
+    /// outgoing instance with the incoming one, which broke loading in its own right.
+    private func retireInstrument(for trackID: UUID, mixer: AVAudioMixerNode) {
+        settledInstruments.remove(trackID)
+        if let auv3 = auv3Units.removeValue(forKey: trackID) {
+            engine.disconnectNodeInput(mixer)
+            engine.detach(auv3)
+        } else if let sampler = samplers.removeValue(forKey: trackID) {
+            engine.disconnectNodeInput(mixer)
+            engine.detach(sampler)
+        }
+    }
+
+    /// The node the track's audio starts from — its AUv3 instrument, or the GM sampler.
+    private func instrumentNode(for trackID: UUID) -> AVAudioNode? {
+        auv3Units[trackID] ?? samplers[trackID]
+    }
+
+    /// Wire instrument → effects (in order) → mixer.
+    ///
+    /// Everything downstream of the instrument is rebuilt from scratch rather than
+    /// patched, because working out which single connection changed for an insert,
+    /// removal or reorder is more error-prone than redoing a chain that is at most a
+    /// few nodes long. Caller must hold auLock.
+    private func rebuildChainLocked(for trackID: UUID) {
+        guard let mixer = trackMixers[trackID], let source = instrumentNode(for: trackID) else { return }
+        let chain = effectUnits[trackID] ?? []
+
+        // Every connection and disconnection below can raise an exception while the
+        // engine is running (it re-initialises the graph each time), so the whole
+        // rewiring is protected. Should anything still be raised, the track falls back
+        // to its instrument alone, with its effects left out, rather than ending the app.
+        let failure = FWDExceptionCatcher.catching {
+            wireChainLocked(trackID: trackID, source: source, mixer: mixer, chain: chain)
+        }
+        if let failure {
+            NSLog("[FWD] Effects could not be wired (%@); the track plays without them",
+                  failure.localizedDescription)
+            _ = FWDExceptionCatcher.catching {
+                unwireLocked(trackID: trackID, source: source, mixer: mixer, chain: chain)
+            }
+            for unit in chain where !bypassedUnits.contains(ObjectIdentifier(unit)) { _ = refuseLocked(unit) }
+            _ = FWDExceptionCatcher.catching { engine.connect(source, to: mixer, format: nil) }
+        }
+
+        // The built-in sampler forgets its General MIDI sound whenever its output is
+        // disconnected and connected again, and falls back to a plain, loud sine tone:
+        // adding an effect to a built-in track made it dull and clicky, and taking the
+        // effect off again did not bring the sound back. So the sound is loaded again
+        // after every rewiring (measured with Tools/EffectInsertTest.swift).
+        if let sampler = samplers[trackID] {
+            loadGMBank(sampler, sound: builtInSounds[trackID] ?? 0)
+        }
+    }
+
+    private func unwireLocked(trackID: UUID, source: AVAudioNode, mixer: AVAudioMixerNode, chain: [AVAudioUnit]) {
+        engine.disconnectNodeInput(mixer)
+        for unit in chain {
+            engine.disconnectNodeInput(unit)
+            engine.disconnectNodeOutput(unit)
+        }
+        engine.disconnectNodeOutput(source)
+        for adapter in effectAdapters[trackID] ?? [] {
+            engine.disconnectNodeInput(adapter)
+            engine.disconnectNodeOutput(adapter)
+            engine.detach(adapter)
+        }
+        effectAdapters[trackID] = nil
+    }
+
+    /// Instrument → each effect in use → the track's mixer. An effect whose output the
+    /// engine then cannot start (error -10868, "format not supported", seen with
+    /// Nembrini's effects) is taken out and the chain wired again without it.
+    private func wireChainLocked(trackID: UUID, source: AVAudioNode, mixer: AVAudioMixerNode,
+                                 chain: [AVAudioUnit]) {
+        var leftOut = Set<ObjectIdentifier>()
+        for _ in 0...chain.count {
+            unwireLocked(trackID: trackID, source: source, mixer: mixer, chain: chain)
+            // `format: nil` into each effect where possible, as for the instrument: let
+            // the engine negotiate rather than forcing stereo, which has silenced plugins
+            // here before. What comes OUT of an effect is set explicitly, to its input's
+            // sample rate — left alone it can stay at a default the effect can't run.
+            var upstream: AVAudioNode = source
+            var upstreamFormat: AVAudioFormat?
+            for unit in chain where !bypassedUnits.contains(ObjectIdentifier(unit))
+                && !leftOut.contains(ObjectIdentifier(unit)) {
+                if let output = connectEffectLocked(unit, after: upstream, upstreamFormat: upstreamFormat,
+                                                    trackID: trackID) {
+                    upstream = unit
+                    upstreamFormat = output.format
+                }
+            }
+            // A bypassed unit is left attached but unconnected, so it keeps its state and
+            // its open editor and costs nothing to bring back.
+            let failed = FWDExceptionCatcher.catching {
+                engine.connect(upstream, to: mixer, format: upstreamFormat)
+            }
+            guard let failed else { return }
+            NSLog("[FWD] Track output could not be connected: %@", failed.localizedDescription)
+            // The last effect in the chain would not run: leave it out and try again.
+            guard let last = upstream as? AVAudioUnit, chain.contains(where: { $0 === last }) else {
+                engine.disconnectNodeOutput(upstream)
+                engine.connect(source, to: mixer, format: nil)
+                return
+            }
+            leftOut.insert(ObjectIdentifier(last))
+            _ = refuseLocked(last)
+        }
+    }
+
+    /// What an effect was connected with: the format to read its output in, or nil
+    /// to let the engine negotiate it.
+    private struct EffectOutput { let format: AVAudioFormat? }
+
+    /// The input and output channel counts an effect says it supports, as pairs, from
+    /// its channel capabilities. Empty when it does not say, which means "anything".
+    /// A negative count is a wildcard (-1: any, matching the other side).
+    private func channelPairs(of unit: AVAudioUnit) -> [(Int, Int)] {
+        let caps = unit.auAudioUnit.channelCapabilities?.map(\.intValue) ?? []
+        return stride(from: 0, to: caps.count - 1, by: 2).map { (caps[$0], caps[$0 + 1]) }
+    }
+
+    private func supports(_ pairs: [(Int, Int)], input: Int, output: Int) -> Bool {
+        guard !pairs.isEmpty else { return true }
+        return pairs.contains { pair in
+            let (i, o) = pair
+            if i == -1 && o == -1 { return input == output }
+            let inOK = i < 0 ? input <= max(2, -i) : i == input
+            let outOK = o < 0 ? output <= max(2, -o) : o == output
+            return inOK && outOK
+        }
+    }
+
+    /// Connect one effect after `upstream`; nil when it could not be connected.
+    ///
+    /// Effects differ in the channels they take. Guitar effects (Nembrini's) are often
+    /// one channel in, two out: given stereo they either refuse — AVAudioEngine then
+    /// raises an exception that ends the app — or accept and render silence. So the
+    /// effect's own channel capabilities choose the wiring: stereo straight through
+    /// when it supports that, otherwise through a mixer node converting to what it
+    /// takes (mono in, stereo out first), at the track's rate, then 48 or 44.1 kHz.
+    /// Every attempt is made under FWDExceptionCatcher; an effect that takes none is
+    /// left out — reported once, never fatal.
+    private func connectEffectLocked(_ unit: AVAudioUnit, after upstream: AVAudioNode,
+                                     upstreamFormat: AVAudioFormat?, trackID: UUID) -> EffectOutput? {
+        let id = ObjectIdentifier(unit)
+        let name = unit.auAudioUnit.audioUnitName ?? unit.name
+        guard unit.numberOfInputs > 0 else { return refuseLocked(unit) }
+        let pairs = channelPairs(of: unit)
+        NSLog("[FWD] %@ channel capabilities: %@", name,
+              pairs.isEmpty ? "not stated" : pairs.map { "\($0.0)→\($0.1)" }.joined(separator: ", "))
+
+        if supports(pairs, input: 2, output: 2),
+           FWDExceptionCatcher.catching({ engine.connect(upstream, to: unit, format: upstreamFormat) }) == nil {
+            refusedUnits.remove(id)
+            // Out at the rate it takes in: an effect whose output is left at another
+            // rate fails to start (-10868), and with it the whole track.
+            let input = unit.inputFormat(forBus: 0)
+            guard input.sampleRate > 0 else { return EffectOutput(format: nil) }
+            let channels = supports(pairs, input: Int(input.channelCount), output: 2) ? 2 : input.channelCount
+            NSLog("[FWD] %@ connected %u in, %u out at %.0f Hz", name, input.channelCount,
+                  UInt32(channels), input.sampleRate)
+            return EffectOutput(format: AVAudioFormat(standardFormatWithSampleRate: input.sampleRate,
+                                                      channels: AVAudioChannelCount(channels)))
+        }
+        engine.disconnectNodeOutput(upstream)
+
+        let offered = upstreamFormat ?? upstream.outputFormat(forBus: 0)
+        let rate = offered.sampleRate > 0 ? offered.sampleRate : engine.outputNode.outputFormat(forBus: 0).sampleRate
+        let layouts = [(1, 2), (1, 1), (2, 1), (2, 2)].filter { supports(pairs, input: $0.0, output: $0.1) }
+        var tried = Set<String>()
+        for sampleRate in [rate, 48_000, 44_100] where sampleRate > 0 {
+            for (input, output) in layouts {
+                guard tried.insert("\(sampleRate)-\(input)-\(output)").inserted,
+                      let inFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate,
+                                                   channels: AVAudioChannelCount(input)),
+                      let outFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate,
+                                                    channels: AVAudioChannelCount(output))
+                else { continue }
+                let adapter = AVAudioMixerNode()
+                engine.attach(adapter)
+                let failed = FWDExceptionCatcher.catching {
+                    engine.connect(upstream, to: adapter, format: upstreamFormat)
+                    engine.connect(adapter, to: unit, format: inFormat)
+                }
+                if failed == nil {
+                    effectAdapters[trackID, default: []].append(adapter)
+                    refusedUnits.remove(id)
+                    NSLog("[FWD] %@ connected %d in, %d out at %.0f Hz", name, input, output, sampleRate)
+                    return EffectOutput(format: outFormat)
+                }
+                engine.disconnectNodeOutput(upstream)
+                engine.disconnectNodeOutput(adapter)
+                engine.detach(adapter)
+            }
+        }
+        return refuseLocked(unit)
+    }
+
+    /// Leave an effect out of the chain, telling the screen the first time.
+    private func refuseLocked(_ unit: AVAudioUnit) -> EffectOutput? {
+        if refusedUnits.insert(ObjectIdentifier(unit)).inserted {
+            let name = unit.auAudioUnit.audioUnitName ?? unit.name
+            NSLog("[FWD] Effect %@ would not connect in any format; left out", name)
+            DispatchQueue.main.async { [weak self] in self?.onEffectRefused?(name) }
+        }
+        return nil
+    }
+
+    private func swapInstrument(_ newUnit: AVAudioUnit, for trackID: UUID, mixer: AVAudioMixerNode) {
+        withLock {
+            retireInstrument(for: trackID, mixer: mixer)
+            engine.attach(newUnit)
+            auv3Units[trackID] = newUnit
+            // Through the effects, not straight to the mixer: swapping the instrument
+            // must not silently drop the chain in front of it.
+            rebuildChainLocked(for: trackID)
+            _ = startEngineIfNeeded()
+        }
+    }
+
+    private func attachSampler(for trackID: UUID, mixer: AVAudioMixerNode) {
+        withLock {
+            retireInstrument(for: trackID, mixer: mixer)
+            let sampler = AVAudioUnitSampler()
+            engine.attach(sampler)
+            loadGMBank(sampler, sound: builtInSounds[trackID] ?? 0)
+            samplers[trackID] = sampler
+            rebuildChainLocked(for: trackID)
+            _ = startEngineIfNeeded()
+        }
+    }
+
+    private func installLevelTap(id: UUID, node: AVAudioMixerNode) {
+        var lastLevelTimestamp: Double = 0
+        node.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+            guard let self else { return }
+            // Throttle FIRST: rms() walks every sample, and this ran on the audio thread
+            // for every buffer even though the result is used 20×/sec.
+            let now = CACurrentMediaTime()
+            guard now - lastLevelTimestamp > 0.05 else { return }
+            lastLevelTimestamp = now
+            guard let sink = self.levelSink() else { return }
+            sink(id, self.levels(buffer))
+        }
+    }
+
+    /// Peak and RMS for one buffer, in linear terms and deliberately UNCLAMPED —
+    /// a signal over full scale must be reportable, or clipping is invisible. The old
+    /// version returned `min(1, rms * 8)`, which pinned the meter around -18 dBFS RMS
+    /// and hid every over.
+    private func levels(_ buffer: AVAudioPCMBuffer) -> AudioLevel {
+        guard let data = buffer.floatChannelData else { return .silent }
+        let count = Int(buffer.frameLength)
+        guard count > 0 else { return .silent }
+        let channels = max(1, Int(buffer.format.channelCount))
+        var sum: Float = 0
+        var peak: Float = 0
+        // Accelerate rather than a per-sample loop: the same sum of squares and largest
+        // magnitude, computed with vector instructions.
+        for channel in 0..<channels {
+            var channelSum: Float = 0
+            var channelPeak: Float = 0
+            vDSP_svesq(data[channel], 1, &channelSum, vDSP_Length(count))
+            vDSP_maxmgv(data[channel], 1, &channelPeak, vDSP_Length(count))
+            sum += channelSum
+            peak = max(peak, channelPeak)
+        }
+        return AudioLevel(peak: peak, rms: sqrt(sum / Float(count * channels)))
+    }
+
+    /// Change the General MIDI sound a track's built-in sampler plays (a program, or
+    /// GeneralMIDI.drumKit). Remembered, so a sampler made later for the track — a
+    /// plugin removed, or one that failed to load — starts on it too.
+    func setBuiltInSound(_ sound: Int, for trackID: UUID) {
+        withLock {
+            builtInSounds[trackID] = sound
+            if let sampler = samplers[trackID] { loadGMBank(sampler, sound: sound) }
+        }
+    }
+
+    /// The General MIDI sound bank, FWD-GM.sf2: each of the 128 programs and the drum
+    /// kit taken from GeneralUser GS (S. Christian Collins) or FluidR3_GM (Frank Wen,
+    /// MIT), as Graham picked them for sound and processor cost, and patched so Apple's
+    /// sampler can play every one (SoundBank/README.md; licences in Resources).
+    /// iPadOS has no General MIDI set of its own — Apple's gs_instruments.dls is only
+    /// on the Mac — so without this every track played the sampler's one plain tone.
+    /// The Mac's set remains a fallback.
+    private static let gmBankURL: URL? = {
+        if let url = Bundle.main.url(forResource: "FWD-GM", withExtension: "sf2") { return url }
+        if let bundle = Bundle(identifier: "com.apple.audio.CoreAudio") {
+            return bundle.url(forResource: "gs_instruments", withExtension: "dls")
+        }
+        return nil
+    }()
+
+    private func loadGMBank(_ sampler: AVAudioUnitSampler, sound: Int = 0) {
+        if let url = Self.gmBankURL {
+            // Melodic sounds are bank 0x79; the drum kit is the percussion bank, 0x78.
+            let drums = sound == GeneralMIDI.drumKit
+            do {
+                try sampler.loadSoundBankInstrument(at: url,
+                                                    program: UInt8(drums ? 0 : min(127, max(0, sound))),
+                                                    bankMSB: drums ? 0x78 : 0x79, bankLSB: 0)
+            } catch {
+                NSLog("[FWD] Built-in sound %d could not be loaded: %@", sound, error.localizedDescription)
+            }
+            return
+        }
+        // Fallback: let the sampler use whatever default sounds it has built in
+    }
+
+    func playNote(trackID: UUID, midiNote: UInt8, velocity: UInt8) {
+        withLock {
+            guard !isSuspended(trackID) else { return }
+            activeNotes[trackID, default: []].insert(midiNote)
+            if let unit = auv3Units[trackID] {
+                sendMIDI(to: unit, 0x90, midiNote, velocity)
+            } else {
+                samplers[trackID]?.startNote(midiNote, withVelocity: velocity, onChannel: 0)
+            }
+        }
+    }
+
+    func stopNote(trackID: UUID, midiNote: UInt8) {
+        withLock {
+            // Note-offs are gated too. A note-off is still a MIDI event: delivering one
+            // to a plugin that isn't ready crashes it exactly like a note-on (GeoShred
+            // segfaults in PerformanceHandler_runMidiEvent on a null handler). Nothing
+            // hangs, because suspendTrack() flushes all notes with a direct all-notes-off
+            // before the gate closes, and the unit is silent for the whole window.
+            guard !isSuspended(trackID) else { return }
+            activeNotes[trackID]?.remove(midiNote)
+            if let unit = auv3Units[trackID] {
+                sendMIDI(to: unit, 0x80, midiNote, 0)
+            } else {
+                samplers[trackID]?.stopNote(midiNote, onChannel: 0)
+            }
+        }
+    }
+
+    /// A sustain pedal, mod wheel or other controller, pitch bend, or aftertouch (per
+    /// note or whole keyboard) from a MIDI keyboard, to the instrument its keys are
+    /// playing. Sent on channel 1, like the notes, and gated by suspension exactly as
+    /// notes are: a plugin that is still loading must not receive any MIDI at all.
+    func sendPerformanceMessage(trackID: UUID, status: UInt8, data1: UInt8, data2: UInt8) {
+        let type = status & 0xF0
+        guard type == 0xB0 || type == 0xE0 || type == 0xA0 || type == 0xD0 else { return }
+        withLock {
+            guard !isSuspended(trackID) else { return }
+            if let unit = auv3Units[trackID] {
+                // Channel pressure is the one two-byte message here.
+                sendMIDI(to: unit, type, data1 & 0x7F, data2 & 0x7F, length: type == 0xD0 ? 2 : 3)
+            } else if type == 0xD0 {
+                samplers[trackID]?.sendPressure(data1 & 0x7F, onChannel: 0)
+            } else {
+                samplers[trackID]?.sendMIDIEvent(type, data1: data1 & 0x7F, data2: data2 & 0x7F)
+            }
+        }
+    }
+
+    /// Always IMMEDIATE.
+    ///
+    /// Stamping a future `AUEventSampleTime` was tried and reverted. `scheduleMIDIEventBlock`
+    /// takes times in the AUDIO UNIT'S OWN render timeline, and AVAudioEngine does not
+    /// expose it — `outputNode.lastRenderTime` counts from when the engine started, while
+    /// a plugin attached later has its own baseline. Events were therefore scheduled far
+    /// in the plugin's future and never sounded: a song whose first track was the
+    /// built-in sampler and the rest AUv3s played only its first track.
+    ///
+    /// (FWD Harp plays everything live, so nothing here is delayed.)
+    ///
+    /// Every message here is three bytes (note on/off, controller), passed as three
+    /// values rather than an array so sending one allocates nothing.
+    ///
+    /// `length` 2 is for the two-byte messages (channel pressure); data2 is then unused
+    /// and sent as 0 in the MIDI 1.0 packet, as the format requires.
+    private func sendMIDI(to unit: AVAudioUnit, _ status: UInt8, _ data1: UInt8, _ data2: UInt8,
+                          length: Int = 3) {
+        let au = unit.auAudioUnit
+        let when = AUEventSampleTimeImmediate
+        if let legacyBlock = au.scheduleMIDIEventBlock {
+            var bytes = (status, data1, length == 2 ? 0 : data2)
+            withUnsafeBytes(of: &bytes) { ptr in
+                guard let base = ptr.bindMemory(to: UInt8.self).baseAddress else { return }
+                legacyBlock(when, 0, length, base)
+            }
+        } else if #available(iOS 15.0, *), let listBlock = au.scheduleMIDIEventListBlock {
+            sendMIDIList(to: listBlock, status, data1, length == 2 ? 0 : data2, at: when)
+        } else {
+            print("[FWD] No MIDI block available for \(au.audioUnitName ?? "unknown")")
+        }
+    }
+
+    @available(iOS 15.0, *)
+    private func sendMIDIList(to block: AUMIDIEventListBlock,
+                              _ status: UInt8, _ d1: UInt8, _ d2: UInt8,
+                              at when: AUEventSampleTime = AUEventSampleTimeImmediate) {
+        // Encode as MIDI 1.0 Universal MIDI Packet:
+        // bits[31-28] = 0x2 (MIDI 1.0 channel voice), [23-16] = status, [15-8] = data1, [7-0] = data2
+        var word = (UInt32(0x2) << 28) | (UInt32(status) << 16) | (UInt32(d1) << 8) | UInt32(d2)
+        // Room for a MIDIEventList and one packet, on the stack rather than the heap.
+        let bufSize = 256
+        withUnsafeTemporaryAllocation(byteCount: bufSize, alignment: 8) { buf in
+            guard let base = buf.baseAddress else { return }
+            let listPtr = base.bindMemory(to: MIDIEventList.self, capacity: 1)
+            let pktPtr = MIDIEventListInit(listPtr, MIDIProtocolID._1_0)
+            _ = MIDIEventListAdd(listPtr, bufSize, pktPtr, 0, 1, &word)
+            _ = block(when, 0, listPtr)
+        }
+    }
+
+    /// The nuclear stop for a hung note, distinct from allNotesOff (which only releases
+    /// notes we know we started). Panic assumes our tracking may be wrong — a plugin's
+    /// own arpeggiator, a stuck sustain, or drift — so it sweeps every SETTLED instrument
+    /// with All Sound Off (CC120), All Notes Off (CC123) and a full 0...127 note-off,
+    /// and every sampler with a full note-off. Only settled units are addressed: an
+    /// unsettled AUv3 has nothing ringing and would crash on the flush (see
+    /// settledInstruments). Safe on settled instruments — they take MIDI normally.
+    func panic() {
+        withLock {
+            for (id, unit) in auv3Units where settledInstruments.contains(id) {
+                sendMIDI(to: unit, 0xB0, 120, 0)   // All Sound Off
+                sendMIDI(to: unit, 0xB0, 123, 0)   // All Notes Off
+                for n in 0...127 { sendMIDI(to: unit, 0x80, UInt8(n), 0) }
+            }
+            for (_, sampler) in samplers {
+                for n in 0...127 { sampler.stopNote(UInt8(n), onChannel: 0) }
+            }
+            activeNotes.removeAll()
+        }
+    }
+
+    func allNotesOff() {
+        withLock {
+            // Only settled AUv3s are addressed — an unsettled one has no ringing notes
+            // (its MIDI was gated) and would crash on the flush. See settledInstruments.
+            // Release only notes we started; a 0...127 sweep is 129 events per plugin.
+            for (id, notes) in activeNotes {
+                guard !notes.isEmpty else { continue }
+                if let unit = auv3Units[id] {
+                    guard settledInstruments.contains(id) else { continue }
+                    for n in notes { sendMIDI(to: unit, 0x80, n, 0) }
+                } else if let sampler = samplers[id] {
+                    for n in notes { sampler.stopNote(n, onChannel: 0) }
+                }
+            }
+            activeNotes.removeAll()
+            // CC123 as a genuine panic broadcast, to settled units only.
+            for (id, unit) in auv3Units where settledInstruments.contains(id) {
+                sendMIDI(to: unit, 0xB0, 123, 0)
+            }
+        }
+    }
+
+    func setVolume(_ volume: Float, for id: UUID) {
+        withLock { trackMixers[id]?.volume = volume }
+    }
+
+    func setPan(_ pan: Float, for id: UUID) {
+        withLock { trackMixers[id]?.pan = pan }
+    }
+}

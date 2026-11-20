@@ -68,6 +68,7 @@
 				000000000000000120000000 /* Sources */,
 				000000000000000130000000 /* Frameworks */,
 				000000000000000140000000 /* Resources */,
+				000000000000000150000000 /* Join sound bank */,
 			);
 			buildRules = (
 			);
@@ -124,6 +125,34 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		000000000000000150000000 /* Join sound bank */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/SoundBank/FWD-GM.sf2.part-a",
+				"$(SRCROOT)/SoundBank/FWD-GM.sf2.part-b",
+				"$(SRCROOT)/SoundBank/FWD-GM.sf2.part-c",
+				"$(SRCROOT)/SoundBank/FWD-GM.sf2.part-d",
+				"$(SRCROOT)/SoundBank/FWD-GM.sf2.part-e",
+				"$(SRCROOT)/SoundBank/FWD-GM.sf2.part-f",
+			);
+			name = "Join sound bank";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/FWD-GM.sf2",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# The General MIDI bank is kept in parts because GitHub refuses files over 100 MB.\n# Joined here into the app bundle. Copied from FWD Sequencer; see SoundBank/README.md.\nset -e\ncat \"$SCRIPT_INPUT_FILE_0\" \"$SCRIPT_INPUT_FILE_1\" \"$SCRIPT_INPUT_FILE_2\" \"$SCRIPT_INPUT_FILE_3\" \"$SCRIPT_INPUT_FILE_4\" \"$SCRIPT_INPUT_FILE_5\" > \"$SCRIPT_OUTPUT_FILE_0\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		000000000000000120000000 /* Sources */ = {
@@ -293,6 +322,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "FWDHarp/Bridge/FWDHarp-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 2;
@@ -329,6 +359,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "FWDHarp/Bridge/FWDHarp-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 2;

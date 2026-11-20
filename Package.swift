@@ -16,13 +16,26 @@ let package = Package(
             path: "FWDHarp",
             exclude: [
                 "Assets.xcassets",
+                "Bridge",
                 "FWDHarp.entitlements",
                 "Info.plist",
+                "PrivacyInfo.xcprivacy",
                 "FWDHarpApp.swift",
-                "ContentView.swift"
+                "ContentView.swift",
+                "Views",
+                "Store",
+                // App bundle resources, loaded through Bundle.main; the core has no use
+                // for them and SwiftPM warns if they are neither declared nor excluded.
+                "Resources",
+                "Engine/AudioEngineManager.swift",
+                "Engine/AudioLevel.swift",
+                "Engine/PluginManager.swift"
             ],
             sources: [
-                "Models/Harmony.swift"
+                "Models/Harmony.swift",
+                "Models/PluginInfo.swift",
+                "Models/GeneralMIDI.swift",
+                "Engine/PluginLoadTracker.swift"
             ]
         ),
         .testTarget(
