@@ -13,7 +13,43 @@ final class PadTests: XCTestCase {
             selection.press(pad)
             names.append(selection.chord(in: c)!.name(preferFlats: false))
         }
-        XCTAssertEqual(names, ["F", "C", "G", "Am", "Em", "Dm"], "4 1 5, then 6 3 2")
+        XCTAssertEqual(names, ["F", "C", "G", "Dm", "Am", "Em"], "4 1 5 on top, 2 6 3 below")
+    }
+
+    func testSusReplacesTheThird() {
+        var selection = PadSelection()
+        selection.press(.one)
+        selection.press(.sus4)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "Csus4")
+        XCTAssertEqual(selection.chord(in: c)?.pitchClasses, [0, 5, 7], "C F G")
+        selection.release(.sus4)
+        selection.press(.sus2)
+        XCTAssertEqual(selection.chord(in: c)?.pitchClasses, [0, 2, 7], "C D G")
+        selection.release(.one)
+        selection.press(.six)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "Asus2",
+                       "a minor chord suspends like a major one")
+    }
+
+    func testTheSeventhWithASusGivesSevenSus() {
+        var selection = PadSelection()
+        selection.press(.five)
+        selection.press(.seven)
+        selection.press(.sus4)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "G7sus4")
+        XCTAssertEqual(selection.chord(in: c)?.pitchClasses, [7, 0, 2, 5], "G C D F")
+    }
+
+    func testWithBothSusPadsTheLastPressedCounts() {
+        var selection = PadSelection()
+        selection.press(.one)
+        selection.press(.sus2)
+        selection.press(.sus4)
+        XCTAssertEqual(selection.suspension, .fourth)
+        selection.release(.sus4)
+        XCTAssertEqual(selection.suspension, .second, "the other is still held")
+        XCTAssertTrue(selection.isHeld(.sus2))
+        XCTAssertFalse(selection.isHeld(.sus4))
     }
 
     func testTheSevenAddsTheCommonSeventh() {

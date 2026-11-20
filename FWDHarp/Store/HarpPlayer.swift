@@ -8,7 +8,7 @@ import Combine
 /// - the same string is played again (it is struck afresh), or
 /// - a different chord pad is pressed, which stops the old chord's notes at once, for
 ///   clean changes (the brief's rule with auto-strum off).
-/// Adding or lifting the 7 stops nothing, so a 7th can be added to a ringing chord.
+/// The modifiers (7th, sus2, sus4) stop nothing, so they can colour a ringing chord.
 /// Lifting every pad leaves the notes ringing too; the plate is then silent until a pad
 /// is pressed. This is the simplest version, to be adjusted once Graham has played it.
 final class HarpPlayer: ObservableObject {
@@ -43,11 +43,9 @@ final class HarpPlayer: ObservableObject {
         return StrumPlate.notes(for: chord, strings: stringCount, from: StrumPlate.lowestNote(in: key))
     }
 
-    /// The pad's chord in the current key, with the 7th while the 7 is held.
+    /// The pad's chord in the current key, with the modifiers held now.
     func chord(on pad: ChordPad) -> Chord? {
-        guard let degree = pad.degree else { return nil }
-        let chord = key.chord(degree: degree)
-        return selection.seventhHeld ? chord.withSeventh : chord
+        selection.chord(on: pad, in: key)
     }
 
     // MARK: Pads

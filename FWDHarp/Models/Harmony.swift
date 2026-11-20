@@ -12,6 +12,11 @@ nonisolated enum ChordQuality: String, Codable, CaseIterable {
     case dominantSeventh
     /// The 7 modifier on a minor chord (Am7 = A C E G).
     case minorSeventh
+    /// The sus modifiers: the 3rd replaced by the 2nd or the 4th (Csus4 = C F G), so
+    /// major and minor chords suspend alike.
+    case suspendedSecond, suspendedFourth
+    /// A sus modifier with the 7 (C7sus4 = C F G B♭).
+    case seventhSuspendedSecond, seventhSuspendedFourth
 
     /// Semitones above the root.
     var intervals: [Int] {
@@ -21,6 +26,10 @@ nonisolated enum ChordQuality: String, Codable, CaseIterable {
         case .diminished: return [0, 3, 6]
         case .dominantSeventh: return [0, 4, 7, 10]
         case .minorSeventh: return [0, 3, 7, 10]
+        case .suspendedSecond: return [0, 2, 7]
+        case .suspendedFourth: return [0, 5, 7]
+        case .seventhSuspendedSecond: return [0, 2, 7, 10]
+        case .seventhSuspendedFourth: return [0, 5, 7, 10]
         }
     }
 
@@ -31,7 +40,18 @@ nonisolated enum ChordQuality: String, Codable, CaseIterable {
         switch self {
         case .major: return .dominantSeventh
         case .minor: return .minorSeventh
-        case .diminished, .dominantSeventh, .minorSeventh: return self
+        case .suspendedSecond: return .seventhSuspendedSecond
+        case .suspendedFourth: return .seventhSuspendedFourth
+        default: return self
+        }
+    }
+
+    /// The quality with its 3rd suspended, keeping any 7th.
+    func suspended(_ suspension: Suspension) -> ChordQuality {
+        let seventh = intervals.contains(10)
+        switch suspension {
+        case .second: return seventh ? .seventhSuspendedSecond : .suspendedSecond
+        case .fourth: return seventh ? .seventhSuspendedFourth : .suspendedFourth
         }
     }
 
@@ -42,6 +62,10 @@ nonisolated enum ChordQuality: String, Codable, CaseIterable {
         case .diminished: return "dim"
         case .dominantSeventh: return "7"
         case .minorSeventh: return "m7"
+        case .suspendedSecond: return "sus2"
+        case .suspendedFourth: return "sus4"
+        case .seventhSuspendedSecond: return "7sus2"
+        case .seventhSuspendedFourth: return "7sus4"
         }
     }
 }
@@ -60,6 +84,16 @@ nonisolated struct Chord: Equatable, Codable {
 
     /// This chord with its 7th added (see ChordQuality.withSeventh).
     var withSeventh: Chord { Chord(root: root, quality: quality.withSeventh) }
+
+    /// This chord with its 3rd suspended (see ChordQuality.suspended).
+    func suspended(_ suspension: Suspension) -> Chord {
+        Chord(root: root, quality: quality.suspended(suspension))
+    }
+}
+
+/// Which note replaces a chord's 3rd: the 2nd (sus2) or the 4th (sus4).
+nonisolated enum Suspension: String, Codable {
+    case second, fourth
 }
 
 nonisolated enum NoteNames {

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The chord pads, laid out for the left hand (see ChordPad), each showing its chord's
-/// name in the chosen key. Many fingers at once: a chord pad and the 7 together, or a
-/// second pad pressed before the first is lifted. Sliding a finger from one pad onto
+/// name in the chosen key, with the modifiers held. Many fingers at once: a chord pad
+/// with the thumb on a modifier, or a second pad pressed before the first is lifted. Sliding a finger from one pad onto
 /// another changes chord.
 struct PadsView: View {
     @ObservedObject var player: HarpPlayer
@@ -40,7 +40,7 @@ struct PadsView: View {
     }
 
     private func isHeld(_ pad: ChordPad) -> Bool {
-        pad.isModifier ? player.selection.seventhHeld : player.selection.held.contains(pad)
+        player.selection.isHeld(pad)
     }
 }
 
@@ -111,8 +111,8 @@ private struct PadFace: View {
                 .foregroundStyle(isHeld ? Color.black.opacity(0.6) : StudioStyle.scaleText)
                 .padding(size.width * 0.09)
 
-            Text(pad.isModifier ? "7th" : (chordName ?? ""))
-                .font(.system(size: size.width * (pad.isModifier ? 0.24 : 0.28), weight: .bold))
+            Text(pad.modifierTitle ?? chordName ?? "")
+                .font(.system(size: size.width * (pad.isModifier ? 0.27 : 0.26), weight: .bold))
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
                 .foregroundStyle(isHeld ? Color.black.opacity(0.85) : Color(white: 0.9))
@@ -120,7 +120,7 @@ private struct PadFace: View {
         }
         .scaleEffect(isHeld ? 0.97 : 1)
         .accessibilityElement()
-        .accessibilityLabel(pad.isModifier ? "Seventh" : (chordName ?? pad.degreeLabel))
+        .accessibilityLabel(pad.modifierTitle ?? chordName ?? pad.degreeLabel)
         .accessibilityAddTraits(isHeld ? [.isButton, .isSelected] : .isButton)
     }
 }
