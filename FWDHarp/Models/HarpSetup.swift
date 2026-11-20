@@ -29,8 +29,8 @@ nonisolated struct PluginSlot: Codable, Identifiable, Equatable {
     }
 }
 
-/// Everything FWD Harp remembers between launches: the instrument and its sound, and
-/// the effects after it. Saved automatically (see SetupStorage).
+/// Everything FWD Harp remembers between launches: the instrument and its sound, the
+/// effects after it, and the key. Saved automatically (see SetupStorage).
 ///
 /// Every field is optional or defaulted and the decoder is tolerant, so a file from a
 /// later or earlier version still opens: settings it does not know are simply left at
@@ -52,6 +52,10 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var effects: [PluginSlot] = []
     /// The whole effects chain switched out. Each effect's own bypass is separate.
     var effectsBypassed: Bool = false
+    /// The key the pads play in: its tonic as a pitch class, 0 = C … 11 = B.
+    var keyTonic: Int = 0
+
+    var key: MajorKey { MajorKey(tonic: keyTonic) }
 
     init() {}
 
@@ -71,12 +75,13 @@ nonisolated struct HarpSetup: Codable, Equatable {
         }
         // A patch with no instrument to belong to means nothing.
         if copy.instrument == nil { copy.instrumentState = nil }
+        if !(0..<12).contains(copy.keyTonic) { copy.keyTonic = 0 }
         copy.formatVersion = Self.currentFormatVersion
         return copy
     }
 
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed
+        case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic
     }
 
     init(from decoder: Decoder) throws {
@@ -87,5 +92,6 @@ nonisolated struct HarpSetup: Codable, Equatable {
         builtInSound = try c.decodeIfPresent(Int.self, forKey: .builtInSound) ?? Self.defaultBuiltInSound
         effects = try c.decodeIfPresent([PluginSlot].self, forKey: .effects) ?? []
         effectsBypassed = try c.decodeIfPresent(Bool.self, forKey: .effectsBypassed) ?? false
+        keyTonic = try c.decodeIfPresent(Int.self, forKey: .keyTonic) ?? 0
     }
 }

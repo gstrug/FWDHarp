@@ -4,11 +4,14 @@ import Foundation
 /// by `swift test` (Package.swift), like FWD Sequencer's core.
 ///
 /// Degrees are 1–7 of the major scale: 1, 4 and 5 major; 2, 3 and 6 minor; 7
-/// diminished. The pads choose which degrees they show and where (Graham's layout,
-/// 2026-11-20: 4 1 5 on top, then 7 3 6, then 2 — see CLAUDE.md, still to be
-/// confirmed in the design brief).
+/// diminished. The pads show 1–6 (design brief, 2026-11-20; see Pads.swift); the 7
+/// pad is a modifier that adds each chord's 7th.
 nonisolated enum ChordQuality: String, Codable, CaseIterable {
     case major, minor, diminished
+    /// The 7 modifier on a major chord: the song-book 7th (C7 = C E G B♭).
+    case dominantSeventh
+    /// The 7 modifier on a minor chord (Am7 = A C E G).
+    case minorSeventh
 
     /// Semitones above the root.
     var intervals: [Int] {
@@ -16,6 +19,19 @@ nonisolated enum ChordQuality: String, Codable, CaseIterable {
         case .major: return [0, 4, 7]
         case .minor: return [0, 3, 7]
         case .diminished: return [0, 3, 6]
+        case .dominantSeventh: return [0, 4, 7, 10]
+        case .minorSeventh: return [0, 3, 7, 10]
+        }
+    }
+
+    /// The quality with its 7th added, as the 7 modifier plays it: dominant 7ths on
+    /// major chords, minor 7ths on minor ones (Graham: "the most common in Western
+    /// music"). Already a 7th, or diminished: unchanged.
+    var withSeventh: ChordQuality {
+        switch self {
+        case .major: return .dominantSeventh
+        case .minor: return .minorSeventh
+        case .diminished, .dominantSeventh, .minorSeventh: return self
         }
     }
 
@@ -24,6 +40,8 @@ nonisolated enum ChordQuality: String, Codable, CaseIterable {
         case .major: return ""
         case .minor: return "m"
         case .diminished: return "dim"
+        case .dominantSeventh: return "7"
+        case .minorSeventh: return "m7"
         }
     }
 }
@@ -39,6 +57,9 @@ nonisolated struct Chord: Equatable, Codable {
     func name(preferFlats: Bool) -> String {
         NoteNames.name(root, preferFlats: preferFlats) + quality.suffix
     }
+
+    /// This chord with its 7th added (see ChordQuality.withSeventh).
+    var withSeventh: Chord { Chord(root: root, quality: quality.withSeventh) }
 }
 
 nonisolated enum NoteNames {
@@ -68,4 +89,7 @@ nonisolated struct MajorKey: Equatable, Codable {
     var prefersFlats: Bool { [5, 10, 3, 8, 1].contains(tonic) }
 
     var name: String { NoteNames.name(tonic, preferFlats: prefersFlats) }
+
+    /// The twelve keys, C to B, for the key button.
+    static let all: [MajorKey] = (0..<12).map { MajorKey(tonic: $0) }
 }

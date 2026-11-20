@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// A test screen for the instrument hosting copied from FWD Sequencer, until the chord
-/// pads and strum plate arrive: choose an instrument (built-in or AUv3), open its
-/// editor, add effects, and hold a test chord (or play a MIDI keyboard) to hear it.
-/// The instrument, its sound and the effects are remembered between launches.
+/// The harp: chord pads under the left hand, the strum plate on the right, and the
+/// instrument, key and effects along the top. The instrument, its sound, the effects
+/// and the key are remembered between launches.
 struct ContentView: View {
-    @StateObject private var store = InstrumentStore()
+    @StateObject private var player = HarpPlayer()
+    private var store: InstrumentStore { player.store }
     @State private var showPicker = false
     @State private var showBuiltInSounds = false
     @State private var showPluginEditor = false
@@ -17,7 +17,14 @@ struct ContentView: View {
         VStack(spacing: 0) {
             topBar
             Divider()
-            testChords
+            HStack(spacing: 24) {
+                PadsView(player: player)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                StrumPlateView(player: player)
+                    .frame(width: 300)
+                    .frame(maxHeight: .infinity)
+            }
+            .padding(20)
         }
         .background(Color(white: 0.08).ignoresSafeArea())
         .sheet(isPresented: $showPicker) {
@@ -69,7 +76,10 @@ struct ContentView: View {
         }
         // A safe moment to keep the instrument's sound and save (FWD lesson 3).
         .onChange(of: scenePhase) { phase in
-            if phase == .background { store.captureAndSave() }
+            if phase == .background {
+                player.releaseAll()
+                store.captureAndSave()
+            }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: store.isLoading)
         .alert("FWD Harp", isPresented: Binding(
@@ -88,6 +98,7 @@ struct ContentView: View {
                 .font(.headline)
                 .foregroundStyle(Color(white: 0.87))
             Spacer()
+            keyMenu
             Button { showPicker = true } label: {
                 HStack(spacing: 8) {
                     if let plugin = store.plugin {
@@ -125,75 +136,29 @@ struct ContentView: View {
         .padding(.vertical, 8)
     }
 
-    /// The four main chords of C, held to sound, for testing the instrument.
-    private var testChords: some View {
-        let key = MajorKey(tonic: 0)
-        return VStack(spacing: 16) {
-            Spacer()
-            Text("Test chords: hold one to hear the instrument")
-                .font(.callout)
-                .foregroundStyle(StudioStyle.scaleText)
-            HStack(spacing: 16) {
-                ForEach([1, 4, 5, 6], id: \.self) { degree in
-                    TestChordButton(chord: key.chord(degree: degree),
-                                    preferFlats: key.prefersFlats,
-                                    store: store)
+    /// The key the pads play in.
+    private var keyMenu: some View {
+        Menu {
+            ForEach(MajorKey.all, id: \.tonic) { key in
+                Button {
+                    player.setKey(key)
+                } label: {
+                    if key == player.key { Label(key.name, systemImage: "checkmark") } else { Text(key.name) }
                 }
             }
-            Spacer()
+        } label: {
+            HStack(spacing: 6) {
+                Text("KEY")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(StudioStyle.scaleText)
+                Text(player.key.name)
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(StudioStyle.displayText)
+            }
+            .studioWindow()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
-    }
-}
-
-/// Sounds its chord (root position, from middle C up) while held.
-private struct TestChordButton: View {
-    let chord: Chord
-    let preferFlats: Bool
-    let store: InstrumentStore
-    @State private var sounding: [UInt8] = []
-
-    private var notes: [UInt8] {
-        var previous = -1
-        return chord.pitchClasses.map { pc in
-            var note = 60 + pc
-            while note <= previous { note += 12 }
-            previous = note
-            return UInt8(note)
-        }
-    }
-
-    var body: some View {
-        Text(chord.name(preferFlats: preferFlats))
-            .font(.title.bold())
-            .foregroundStyle(sounding.isEmpty ? Color(white: 0.87) : .black)
-            .frame(width: 130, height: 110)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(sounding.isEmpty
-                          ? AnyShapeStyle(LinearGradient(colors: [StudioStyle.capTop, StudioStyle.capBottom],
-                                                          startPoint: .top, endPoint: .bottom))
-                          : AnyShapeStyle(StudioStyle.displayText))
-            )
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.10), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.55), radius: 2, y: 2)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard sounding.isEmpty else { return }
-                        sounding = notes
-                        for note in sounding { store.noteOn(note) }
-                    }
-                    .onEnded { _ in release() }
-            )
-            .onDisappear { release() }
-            .accessibilityLabel("Test chord \(chord.name(preferFlats: preferFlats))")
-    }
-
-    private func release() {
-        for note in sounding { store.noteOff(note) }
-        sounding = []
+        .accessibilityLabel("Key: \(player.key.name) major")
     }
 }
 

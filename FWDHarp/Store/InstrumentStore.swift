@@ -105,6 +105,10 @@ final class InstrumentStore: ObservableObject {
         engine.setBuiltInSound(sound, for: Self.partID)
     }
 
+    func setKey(_ key: MajorKey) {
+        setup.keyTonic = key.tonic
+    }
+
     /// The instrument's editor closed: keep its sound.
     func captureInstrumentState() {
         guard !isLoading, plugin != nil else { return }

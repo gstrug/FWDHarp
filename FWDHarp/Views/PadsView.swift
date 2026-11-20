@@ -1,0 +1,126 @@
+import SwiftUI
+
+/// The chord pads, laid out for the left hand (see ChordPad), each showing its chord's
+/// name in the chosen key. Many fingers at once: a chord pad and the 7 together, or a
+/// second pad pressed before the first is lifted. Sliding a finger from one pad onto
+/// another changes chord.
+struct PadsView: View {
+    @ObservedObject var player: HarpPlayer
+    @State private var touches = PadTouches()
+
+    var body: some View {
+        GeometryReader { proxy in
+            let layout = PadLayout(size: proxy.size)
+            ZStack(alignment: .topLeading) {
+                ForEach(ChordPad.allCases, id: \.self) { pad in
+                    let frame = layout.frame(of: pad)
+                    PadFace(pad: pad,
+                            chordName: player.chord(on: pad)?.name(preferFlats: player.key.prefersFlats),
+                            isHeld: isHeld(pad),
+                            isSounding: player.selection.current == pad,
+                            size: frame.size)
+                        .frame(width: frame.width, height: frame.height)
+                        .offset(x: frame.minX, y: frame.minY)
+                }
+                MultiTouchSurface(
+                    onBegan: { id, point in
+                        guard let pad = layout.pad(at: point) else { return }
+                        touches.begin(id, on: pad, player: player)
+                    },
+                    onMoved: { id, point in
+                        touches.move(id, to: layout.pad(at: point), player: player)
+                    },
+                    onEnded: { id in touches.end(id, player: player) }
+                )
+                .accessibilityHidden(true)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Chord pads")
+    }
+
+    private func isHeld(_ pad: ChordPad) -> Bool {
+        pad.isModifier ? player.selection.seventhHeld : player.selection.held.contains(pad)
+    }
+}
+
+/// Which pad each finger is on. A pad counts as held while any finger is on it, so two
+/// fingers on one pad do not let it go when the first lifts.
+private final class PadTouches {
+    private var padForTouch: [ObjectIdentifier: ChordPad] = [:]
+    private var fingers: [ChordPad: Int] = [:]
+
+    func begin(_ id: ObjectIdentifier, on pad: ChordPad, player: HarpPlayer) {
+        padForTouch[id] = pad
+        hold(pad, player)
+    }
+
+    func move(_ id: ObjectIdentifier, to pad: ChordPad?, player: HarpPlayer) {
+        let before = padForTouch[id]
+        guard pad != before else { return }
+        // Onto the new pad first, so sliding between chords never passes through none.
+        if let pad { padForTouch[id] = pad; hold(pad, player) } else { padForTouch.removeValue(forKey: id) }
+        if let before { letGo(before, player) }
+    }
+
+    func end(_ id: ObjectIdentifier, player: HarpPlayer) {
+        if let pad = padForTouch.removeValue(forKey: id) { letGo(pad, player) }
+    }
+
+    private func hold(_ pad: ChordPad, _ player: HarpPlayer) {
+        fingers[pad, default: 0] += 1
+        if fingers[pad] == 1 { player.press(pad) }
+    }
+
+    private func letGo(_ pad: ChordPad, _ player: HarpPlayer) {
+        guard let count = fingers[pad] else { return }
+        if count <= 1 {
+            fingers.removeValue(forKey: pad)
+            player.release(pad)
+        } else {
+            fingers[pad] = count - 1
+        }
+    }
+}
+
+/// One pad, in the studio style: a raised cap that lights when held.
+private struct PadFace: View {
+    let pad: ChordPad
+    let chordName: String?
+    let isHeld: Bool
+    /// The pad whose chord the plate is playing (the last pressed of those held).
+    let isSounding: Bool
+    let size: CGSize
+
+    private var lit: Color { pad.isModifier ? .orange : StudioStyle.displayText }
+
+    var body: some View {
+        let corner = size.width * 0.16
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: corner)
+                .fill(isHeld
+                      ? AnyShapeStyle(lit.opacity(isSounding || pad.isModifier ? 1 : 0.55))
+                      : AnyShapeStyle(LinearGradient(colors: [StudioStyle.capTop, StudioStyle.capBottom],
+                                                     startPoint: .top, endPoint: .bottom)))
+                .overlay(RoundedRectangle(cornerRadius: corner)
+                    .stroke(Color.white.opacity(isHeld ? 0.35 : 0.10), lineWidth: 0.5))
+                .shadow(color: .black.opacity(isHeld ? 0.2 : 0.55), radius: isHeld ? 1 : 3, y: isHeld ? 1 : 3)
+
+            Text(pad.degreeLabel)
+                .font(.system(size: max(10, size.width * 0.13), weight: .semibold))
+                .foregroundStyle(isHeld ? Color.black.opacity(0.6) : StudioStyle.scaleText)
+                .padding(size.width * 0.09)
+
+            Text(pad.isModifier ? "7th" : (chordName ?? ""))
+                .font(.system(size: size.width * (pad.isModifier ? 0.24 : 0.28), weight: .bold))
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
+                .foregroundStyle(isHeld ? Color.black.opacity(0.85) : Color(white: 0.9))
+                .frame(width: size.width, height: size.height)
+        }
+        .scaleEffect(isHeld ? 0.97 : 1)
+        .accessibilityElement()
+        .accessibilityLabel(pad.isModifier ? "Seventh" : (chordName ?? pad.degreeLabel))
+        .accessibilityAddTraits(isHeld ? [.isButton, .isSelected] : .isButton)
+    }
+}

@@ -24,6 +24,7 @@ let package = Package(
                 "ContentView.swift",
                 "Views",
                 "Store/InstrumentStore.swift",
+                "Store/HarpPlayer.swift",
                 // App bundle resources, loaded through Bundle.main; the core has no use
                 // for them and SwiftPM warns if they are neither declared nor excluded.
                 "Resources",
@@ -39,6 +40,8 @@ let package = Package(
                 "Engine/PluginLoadTracker.swift",
                 "Models/HarpSetup.swift",
                 "Models/MIDIMessage.swift",
+                "Models/Pads.swift",
+                "Models/StrumPlate.swift",
                 "Store/SetupStorage.swift"
             ]
         ),
