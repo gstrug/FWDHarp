@@ -6,7 +6,8 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var store = InstrumentStore()
     @State private var showPicker = false
-    @State private var showEditor = false
+    @State private var showBuiltInSounds = false
+    @State private var showPluginEditor = false
     @State private var showCredits = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -23,7 +24,21 @@ struct ContentView: View {
                 builtInSound: store.builtInSound
             )
         }
-        .sheet(isPresented: $showEditor) { editor }
+        .sheet(isPresented: $showBuiltInSounds) {
+            BuiltInSoundSheet(title: "Built-in Sound", current: store.builtInSound) { sound in
+                store.setBuiltInSound(sound)
+                // Play the new sound at once, so it can be heard.
+                store.noteOn(60)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { store.noteOff(60) }
+            }
+        }
+        // Full screen, as in FWD Sequencer: a plugin's own window needs the room, and in
+        // a sheet it came up at a much smaller scale (Graham, 2026-11-20).
+        .fullScreenCover(isPresented: $showPluginEditor) {
+            PluginEditorView(trackID: InstrumentStore.partID,
+                             trackName: store.instrumentName,
+                             onReload: { store.reload() })
+        }
         .sheet(isPresented: $showCredits) { CreditsView() }
         // BLOCKING while the instrument loads: interrupting a fragile AUv3 while it
         // instantiates crashes it (FWD lesson 1). Do not add .allowsHitTesting(false).
@@ -83,7 +98,9 @@ struct ContentView: View {
             .accessibilityLabel("Instrument: \(store.instrumentName)")
             .accessibilityHint("Choose another instrument")
 
-            StudioTapButton(title: "EDIT") { showEditor = true }
+            StudioTapButton(title: "EDIT") {
+                if store.plugin == nil { showBuiltInSounds = true } else { showPluginEditor = true }
+            }
                 .accessibilityLabel("Edit Instrument")
 
             Button { showCredits = true } label: {
@@ -97,22 +114,6 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-    }
-
-    @ViewBuilder
-    private var editor: some View {
-        if store.plugin == nil {
-            BuiltInSoundSheet(title: "Built-in Sound", current: store.builtInSound) { sound in
-                store.setBuiltInSound(sound)
-                // Play the new sound at once, so it can be heard.
-                store.noteOn(60)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { store.noteOff(60) }
-            }
-        } else {
-            PluginEditorView(trackID: InstrumentStore.partID,
-                             trackName: store.instrumentName,
-                             onReload: { store.reload() })
-        }
     }
 
     /// The four main chords of C, held to sound, for testing the instrument.
