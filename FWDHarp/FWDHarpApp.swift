@@ -1,6 +1,7 @@
 import SwiftUI
 
-@main struct MyApp: App {
+@main
+struct FWDHarpApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()

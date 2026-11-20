@@ -1,0 +1,125 @@
+# FWD Harp — project briefing for Claude
+
+Read this first in any new session. Started 2026-11-20 as a new app beside FWD
+Sequencer, reusing its well-tested parts. If this file disagrees with the code, the
+code wins — then fix this file.
+
+## Who and how we work
+
+- Owner: Graham Struwig. **Not a programmer.** He relies on Claude to run git, edit
+  the Xcode project, build checks and push to GitHub. Explain in plain words, do the
+  technical steps yourself, and say what you did. When he must do something himself
+  (Xcode, App Store Connect, github.com), talk him through it click by click.
+- Personal project. GitHub: `gstrug/FWDHarp`, branch `main`.
+- Apple developer team `8MDY92DSB9`, bundle id `com.grahamstruwig.FWDHarp`.
+- Version 1.0, build 1. Every TestFlight upload needs `CURRENT_PROJECT_VERSION`
+  bumped first (Debug and Release), committed as "Bump build to NN for TestFlight".
+- Commit often with plain-English messages stating *why*. Author commits as
+  `Graham Struwig <g.struwig@gmail.com>`.
+- **Open `FWDHarp.xcodeproj`**, not the folder or `Package.swift` (that is the
+  test-only core package; it builds but cannot run).
+- **Deployment target stays iPadOS 16.6**, iPad only (`TARGETED_DEVICE_FAMILY = 2`).
+  Decline Xcode's "Update to recommended settings": on FWD it changed the target and
+  broke the GitHub build.
+- **This Xcode (27) makes new projects without the usual form**: File ▸ New ▸ Project
+  opens an "Untitled Project"; it is named when saved. Its defaults (iPhone, Mac,
+  Vision Pro, iOS 27, a placeholder bundle id, `objectVersion 90`) were all replaced
+  on 2026-11-20 with FWD's settings (`objectVersion 77`).
+
+### Release workflow — Graham's rule (same as FWD)
+
+1. Make the change and **commit locally only**. **Do not push to GitHub.**
+2. Graham builds from Xcode and tests on his iPad.
+3. When he says so: bump the build number, commit, **then push**.
+4. Graham archives and uploads to TestFlight himself.
+
+### How Claude reaches the code
+
+- The folder on Graham's Mac (`~/Desktop/FWDHarp`) is connected to the session; edits
+  and commits happen there through the device shell (a Linux sandbox: no Xcode, no
+  `swift`, no GitHub). Git there needs delete permission on the folder (git removes its
+  own lock files), so ask for it before the first commit.
+- To push: `git bundle create .build/claude-transfer.bundle origin/main..main` on the
+  Mac (the whole `main` for the first push), stage the bundle to the cloud workspace,
+  fetch it into a cloud clone of `gstrug/FWDHarp` and push from there. Then
+  `git update-ref refs/remotes/origin/main <sha>` on the Mac.
+- GitHub Actions (`Validate`, `.github/workflows/validate.yml`) runs `swift test` and
+  Debug and Release simulator builds — the only compile check, since nothing on
+  Claude's side runs Xcode. Check with `gh run list`.
+- Files added inside `FWDHarp/` join the app automatically (synchronized folder).
+  `Info.plist` is excluded from it by an exception in the project file — keep it so,
+  or the build fails with two Info.plists. A new pure, testable file also goes in
+  `Package.swift`'s `sources`.
+
+## What it is (Graham's description, 2026-11-20)
+
+An iPad **AUv3 instrument and effects host that plays like an electronic chord harp**
+(the Suzuki Omnichord is the model — **never use that name**, in the app, its text or
+the App Store). Not a sequencer. Same look and feel as FWD Sequencer.
+
+- **Chord pads under the left hand**, in fixed positions that fall naturally under
+  the fingers, each showing its chord's name in the chosen key. Graham's sketch:
+  top row **4 1 5**, middle row **7 3 6** (the 7th and the minor 3rd and 6th), bottom
+  **2** (minor). To be confirmed in the design brief (exact positions, 7 = diminished
+  or a dominant 7th, extra chords, how the key is chosen).
+- **Strum plate on the right**, played by touch or by strumming across it; it plays
+  the held chord's notes up the plate.
+- **Strum patterns** for the plate: arpeggiate, chords, alternate and so on. Possibly
+  **scales** on the plate.
+- **MIDI out**, so it can be used as a controller for other apps and hardware.
+
+## Reuse from FWD Sequencer (copied, not shared)
+
+FWD Harp gets its own copies; FWD stays untouched and a fix in one cannot break the
+other. Graham still visits FWD for fixes. Candidates, from `~/Desktop/FwdSequencer`:
+`Engine/AudioEngineManager.swift` (plugin hosting, effects chain, state capture, load
+protection — strip the sequencer parts), `Engine/PluginManager.swift`,
+`Engine/PluginLoadTracker.swift`, `Bridge/` (exception catcher, view hosting),
+`Views/PluginEditorView.swift`, plugin pickers, `TrackEffectsView`, the GM sound bank
+(`SoundBank/` parts + the "Join sound bank" build phase + licences + Credits), MIDI
+input (`Engine/MIDIInputManager.swift`, `Models/MIDIControl.swift`,
+`Store/MIDIControlCenter.swift` — Learn, templates, key routing incl. Transpose and
+Lowest/Highest Note), `Views/StudioControls.swift` (the look), help mode
+(`HelpMode.swift`, `HelpTopics.swift` — new wording for this app), saving with backups
+and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
+
+## Hard-won lessons from FWD (do not re-learn these)
+
+1. **Plugin loading is fragile.** Generation-tokened loads with a 30 s timeout and GM
+   fallback, per-track MIDI suspension (reference-counted; a superseded load must hand
+   its suspend back), and a *blocking* "Loading instruments…" overlay. Effects need a
+   timeout too.
+2. **Don't transform plugin views** (pinch-zoom): out-of-process UIs go blank. Size
+   them with Auto Layout.
+3. **Plugin state** is a binary plist; trust `fullState` only with a data payload.
+   Capture only at safe moments, and **only instruments whose sound may have changed**
+   (chosen fresh or editor opened) — a plugin that ignored its restore on a cold start
+   otherwise has its default saved over the user's patch.
+4. **Thread safety:** engine dictionaries behind one lock; saving must never mutate
+   the document.
+5. **Don't stamp AUv3 notes with future sample times** (plugins have their own render
+   timeline). Flush on stop only.
+6. **Unit tests can't hear.** Anything touching timing or plugins is checked on a
+   real iPad with real plugins before building on it.
+7. **AVAudioUnitSampler drops its sound bank when rewired** (adding an effect): reload
+   the bank after every chain rebuild.
+8. **GeoShred** is not reliably hostable; if any plugin is slow, check its own app first
+   (GeoShred was held up by a promo video in its app).
+9. **Effects that refuse a format** raise an NSException on connect: connect through
+   the Objective-C catcher and a converter mixer.
+10. Graham's playing: left-hand chords, right-hand broken chords. Live-key features
+    (like FWD's Lowest Note) were reworked three times before they suited him — build
+    the simplest version, let him play it, then adjust.
+
+## Build and test
+
+- Open `FWDHarp.xcodeproj`, scheme `FWDHarp`, run on the iPad.
+- `swift test` for the portable core (`Package.swift`, `Tests/FWDHarpCoreTests`).
+- AUv3 hosting must be tested on a physical iPad with plugins installed.
+
+## Where things stand
+
+- 2026-11-20: project created and set up like FWD (settings, Info.plist, entitlements,
+  test package with `Models/Harmony.swift` — the seven chords of a major key and their
+  names — and the GitHub check). Placeholder screen. Next: a design brief with Graham,
+  then copy FWD's hosting and MIDI in, then the pads and strum plate.
