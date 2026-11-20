@@ -145,6 +145,13 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   licences, Credits, PrivacyInfo. `Store/InstrumentStore.swift` holds the one instrument
   (fixed part id, default GM 46 Orchestral Harp; not saved yet). `ContentView` is a test
   screen: instrument chip, EDIT, hold-to-sound test chords C F G Am. Compiles on GitHub.
-  Still to copy: effects (TrackEffectsView), MIDI input/Learn, help mode, saving.
+  Then (same day): saving (`Models/HarpSetup.swift`, `Store/SetupStorage.swift`: one
+  setup in Application Support/Setup, backup + quarantine, saved 1 s after a change and on
+  backgrounding; instrument patch captured on editor close/background only if
+  `mayHaveNewState`), effects (`Views/EffectsView.swift`, FX chip; effect editors full
+  screen), MIDI keyboard input playing the instrument (`Engine/MIDIInputManager.swift`,
+  `Models/MIDIMessage.swift`). Plugin editors open with `.fullScreenCover`, as in FWD
+  (a sheet made them small). Deferred until the pads/plate exist: MIDI Learn
+  (MIDIControlCenter) and help mode, which need the harp's own controls.
   Note: the audio buffer is FWD's 23 ms (chosen against crackle); may feel slow for live
   strumming, so check it when the plate exists.
