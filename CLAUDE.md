@@ -183,4 +183,11 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   when due; each step's notes released at the next). AUTO / pattern menu / BPM readout +
   TAP above the pads; pattern and tempo saved, AUTO not. RANGE moved to the top bar
   beside HOLD; OCT above the plate. Still to come: MIDI clock and Link for tempo.
+- 2026-11-21: after Graham played auto-strum: tempo changes no longer pause it (each
+  step due one interval after the previous one was due, at the tempo then — never
+  restart the clock on a change); arpeggios Down and 2-octave Up/Down/Up-Down; Hold
+  keeps the modifiers with the kept chord (PadSelection.latchedSeventh /
+  latchedSuspension; pressing the pad again takes the modifiers held then); plate note
+  orders (PlatePattern: Straight, Alternating, Rolling, Octaves, Bass + Chord) in a
+  menu beside OCT, saved; auto-strum builds from the straight order.
 
