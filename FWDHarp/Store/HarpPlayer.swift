@@ -124,6 +124,14 @@ final class HarpPlayer: ObservableObject {
         syncAutoStrum(newPad: false)
     }
 
+    /// STOP: let go of the chord Hold is keeping, so auto-strum's pattern ends and the
+    /// plate goes quiet until the next pad. Hold stays on; notes ringing on the plate
+    /// finish as they would.
+    func stopKeptChord() {
+        selection.releaseKept()
+        syncAutoStrum(newPad: false)
+    }
+
     func setPlateOctaves(_ octaves: Int) {
         store.setPlateOctaves(octaves)
         syncAutoStrum(newPad: false)

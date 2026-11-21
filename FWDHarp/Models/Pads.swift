@@ -151,6 +151,11 @@ nonisolated struct PadSelection: Equatable {
         }
     }
 
+    /// Let go of the chord Hold is keeping (STOP), leaving Hold on for the next one.
+    mutating func releaseKept() {
+        clearLatch()
+    }
+
     private mutating func clearLatch() {
         latched = nil
         latchedSeventh = false

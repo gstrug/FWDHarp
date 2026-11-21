@@ -282,3 +282,22 @@ final class ScaleTests: XCTestCase {
         XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "C7", "a second press is still on")
     }
 }
+
+final class StopKeptChordTests: XCTestCase {
+    func testStopLetsTheKeptChordGoButLeavesHoldOn() {
+        var selection = PadSelection()
+        selection.setHolding(true)
+        selection.press(.seven)
+        selection.press(.one)
+        selection.release(.one)
+        selection.release(.seven)
+        XCTAssertEqual(selection.current, .one)
+        selection.releaseKept()
+        XCTAssertNil(selection.current)
+        XCTAssertFalse(selection.isInForce(.seven))
+        XCTAssertTrue(selection.isHolding)
+        selection.press(.five)
+        selection.release(.five)
+        XCTAssertEqual(selection.current, .five, "Hold keeps the next chord")
+    }
+}

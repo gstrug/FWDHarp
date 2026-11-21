@@ -51,37 +51,36 @@ struct ContentView: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 12) {
-            Text("FWD Harp")
-                .font(.headline)
-                .foregroundStyle(Color(white: 0.87))
-            StudioToggleChip(title: "HOLD",
-                             isOn: Binding(get: { player.selection.isHolding },
-                                           set: { player.setHolding($0) }),
-                             tint: .orange,
-                             accessibilityLabel: "Hold: keep the last chord after lifting your hand")
-            RangeChips(player: player)
-            ScaleMenu(player: player)
-            Spacer()
-            keyMenu
-            PartInstrumentButtons(store: store, part: .plate)
-            EffectsToggleButton(store: store, part: .plate)
-            StudioToggleChip(title: "MIX", isOn: $showMixer, tint: StudioStyle.displayText,
-                             accessibilityLabel: "Mixer, in place of the pads")
-
-            StudioTapButton(title: "PANIC") { player.panic() }
-                .accessibilityLabel("MIDI panic: stop every sounding note")
-
-            Button { showCredits = true } label: {
-                Image(systemName: "info.circle")
-                    .font(.title3)
-                    .foregroundStyle(Color(white: 0.7))
-                    .frame(width: 44, height: 44)
+        // Two parts, lined up with the screen below: the left over the pads, and the
+        // plate's own instrument, EDIT and FX directly over the plate (Graham,
+        // 2026-11-21). Same padding and gap as the pads and plate, so they align.
+        HStack(spacing: 24) {
+            HStack(spacing: 12) {
+                Button { showCredits = true } label: {
+                    Image(systemName: "info.circle")
+                        .font(.title3)
+                        .foregroundStyle(Color(white: 0.7))
+                        .frame(width: 36, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("FWD Harp: About and Credits")
+                keyMenu
+                RangeChips(player: player)
+                ScaleMenu(player: player)
+                Spacer(minLength: 8)
+                StudioToggleChip(title: "MIX", isOn: $showMixer, tint: StudioStyle.displayText,
+                                 accessibilityLabel: "Mixer, in place of the pads")
+                StudioTapButton(title: "PANIC") { player.panic() }
+                    .accessibilityLabel("MIDI panic: stop every sounding note")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("About and Credits")
+            .frame(maxWidth: .infinity)
+            HStack(spacing: 10) {
+                PartInstrumentButtons(store: store, part: .plate)
+                EffectsToggleButton(store: store, part: .plate)
+            }
+            .frame(width: 300, alignment: .trailing)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
         .padding(.vertical, 8)
     }
 
@@ -260,6 +259,17 @@ private struct AutoStrumBar: View {
                                            set: { player.setAutoStrumming($0) }),
                              tint: .green,
                              accessibilityLabel: "Auto-strum: pressing a pad plays the pattern")
+            StudioToggleChip(title: "HOLD",
+                             isOn: Binding(get: { player.selection.isHolding },
+                                           set: { player.setHolding($0) }),
+                             tint: .orange,
+                             accessibilityLabel: "Hold: keep the last chord after lifting your hand")
+            // With HOLD on the kept chord never ends by itself: STOP lets it go, which
+            // ends auto-strum's pattern too. HOLD stays on for the next chord.
+            StudioTapButton(title: "STOP") { player.stopKeptChord() }
+                .disabled(player.selection.latched == nil)
+                .opacity(player.selection.latched == nil ? 0.45 : 1)
+                .accessibilityLabel("Stop the kept chord")
             Menu {
                 ForEach(AutoStrumPattern.allCases, id: \.self) { pattern in
                     Button {
