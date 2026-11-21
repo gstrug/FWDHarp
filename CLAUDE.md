@@ -176,4 +176,11 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   Next: auto-strum (four patterns) and tempo.
 - Delete permission on the folder is per connection: after the Mac reconnects (e.g.
   overnight) ask for it again BEFORE the first git command, or git leaves .lock files.
+- 2026-11-21: step 4 (first part), auto-strum. `Models/AutoStrum.swift` (patterns:
+  Arpeggio Up / Up-Down in eighths, Block Chords per beat, Bass + Chord oom-pah, Single
+  Sweep per pad press; figure = plate's lowest strings, chord once + root on top; tap
+  tempo), `Engine/AutoStrummer.swift` (own queue, steps timed from the start, notes sent
+  when due; each step's notes released at the next). AUTO / pattern menu / BPM readout +
+  TAP above the pads; pattern and tempo saved, AUTO not. RANGE moved to the top bar
+  beside HOLD; OCT above the plate. Still to come: MIDI clock and Link for tempo.
 
