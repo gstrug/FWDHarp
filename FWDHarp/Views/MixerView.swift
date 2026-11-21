@@ -136,10 +136,12 @@ private struct MasterStrip: View {
     @ObservedObject var levels: LevelMonitor
 
     var body: some View {
+        // Clear spaces rather than EmptyView, which has no size: the strip's back plate
+        // came up shorter than the others.
         StripShell(title: "MASTER") {
-            EmptyView()
+            Color.clear
         } pan: {
-            EmptyView()
+            Color.clear
         } fader: {
             HStack(alignment: .bottom, spacing: 8) {
                 StudioFader(value: Binding(get: { Double(FaderScale.dB(fromLinear: store.setup.masterVolume)) },
@@ -154,7 +156,7 @@ private struct MasterStrip: View {
                     .frame(width: 12, height: StripSize.faderHeight)
             }
         } mute: {
-            EmptyView()
+            Color.clear
         }
     }
 }

@@ -168,51 +168,45 @@ private struct ScaleMenu: View {
     }
 }
 
-/// Above the plate: the order of its notes, and the octave buttons that move it.
+/// Above the plate: the order of its notes, how long they ring, and the octave
+/// buttons that move it.
 private struct PlateControls: View {
     @ObservedObject var player: HarpPlayer
 
     var body: some View {
-        HStack(spacing: 8) {
-            Menu {
-                ForEach(PlatePattern.allCases, id: \.self) { pattern in
-                    Button {
-                        player.setPlatePattern(pattern)
-                    } label: {
-                        if pattern == player.platePattern {
-                            Label(pattern.title, systemImage: "checkmark")
-                        } else {
-                            Text(pattern.title)
-                        }
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                StudioMenu(title: player.platePattern.title, label: "Plate order") {
+                    ForEach(PlatePattern.allCases, id: \.self) { pattern in
+                        check(pattern.title, pattern == player.platePattern) { player.setPlatePattern(pattern) }
                     }
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(player.platePattern.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(StudioStyle.displayText)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(StudioStyle.scaleText)
+                StudioMenu(title: "RING \(player.plateRing.title)", label: "How long plate notes ring") {
+                    ForEach(PlateRing.allCases, id: \.self) { ring in
+                        check(ring.title, ring == player.plateRing) { player.setPlateRing(ring) }
+                    }
                 }
-                .studioWindow()
             }
-            .accessibilityLabel("Plate order: \(player.platePattern.title)")
-            Spacer(minLength: 0)
-            Text("OCT")
-                .font(.system(size: 11, weight: .bold)).tracking(0.8)
-                .foregroundStyle(StudioStyle.scaleText)
-            octaveButton("chevron.down", step: -1, label: "Octave down",
-                         enabled: player.octaveShift > StrumPlate.octaveShiftRange.lowerBound)
-            Text(player.octaveShift > 0 ? "+\(player.octaveShift)" : "\(player.octaveShift)")
-                .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StudioStyle.displayText)
-                .frame(minWidth: 22)
-                .accessibilityLabel("Octave \(player.octaveShift)")
-            octaveButton("chevron.up", step: 1, label: "Octave up",
-                         enabled: player.octaveShift < StrumPlate.octaveShiftRange.upperBound)
-            Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                Text("OCT")
+                    .font(.system(size: 11, weight: .bold)).tracking(0.8)
+                    .foregroundStyle(StudioStyle.scaleText)
+                octaveButton("chevron.down", step: -1, label: "Octave down",
+                             enabled: player.octaveShift > StrumPlate.octaveShiftRange.lowerBound)
+                Text(player.octaveShift > 0 ? "+\(player.octaveShift)" : "\(player.octaveShift)")
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(StudioStyle.displayText)
+                    .frame(minWidth: 22)
+                    .accessibilityLabel("Octave \(player.octaveShift)")
+                octaveButton("chevron.up", step: 1, label: "Octave up",
+                             enabled: player.octaveShift < StrumPlate.octaveShiftRange.upperBound)
+            }
+        }
+    }
+
+    private func check(_ title: String, _ selected: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            if selected { Label(title, systemImage: "checkmark") } else { Text(title) }
         }
     }
 
@@ -228,6 +222,29 @@ private struct PlateControls: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .accessibilityLabel(label)
+    }
+}
+
+/// A menu in the studio style: its current choice in a dark window, with a chevron.
+private struct StudioMenu<Items: View>: View {
+    let title: String
+    let label: String
+    @ViewBuilder let items: Items
+
+    var body: some View {
+        Menu { items } label: {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(StudioStyle.displayText)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(StudioStyle.scaleText)
+            }
+            .studioWindow()
+        }
+        .accessibilityLabel("\(label): \(title)")
     }
 }
 

@@ -68,6 +68,8 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var platePattern: PlatePattern = .straight
     /// What the plate plays: the chord held, or a scale in the key.
     var plateScale: PlateScale = .chord
+    /// How long plate notes sound.
+    var plateRing: PlateRing = .long
     var tempo: Double = AutoStrum.defaultTempo
     /// Auto-strum's own sound, or nil to play through the plate's instrument (the
     /// default, so nothing changes until one is chosen, and a heavy plugin is not
@@ -136,7 +138,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic
         case plateOctaves, octaveShift, autoStrumPattern, tempo, platePattern, plateScale
-        case autoSound, plateMix, autoMix, masterVolume
+        case autoSound, plateMix, autoMix, masterVolume, plateRing
     }
 
     init(from decoder: Decoder) throws {
@@ -155,6 +157,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
         tempo = try c.decodeIfPresent(Double.self, forKey: .tempo) ?? AutoStrum.defaultTempo
         platePattern = (try? c.decodeIfPresent(PlatePattern.self, forKey: .platePattern)) ?? .straight
         plateScale = (try? c.decodeIfPresent(PlateScale.self, forKey: .plateScale)) ?? .chord
+        plateRing = (try? c.decodeIfPresent(PlateRing.self, forKey: .plateRing)) ?? .long
         autoSound = try c.decodeIfPresent(PartSound.self, forKey: .autoSound)
         plateMix = try c.decodeIfPresent(ChannelMix.self, forKey: .plateMix) ?? ChannelMix()
         autoMix = try c.decodeIfPresent(ChannelMix.self, forKey: .autoMix) ?? ChannelMix()

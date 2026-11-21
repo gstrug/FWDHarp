@@ -24,6 +24,9 @@ final class HarpPlayer: ObservableObject {
 
     /// Notes sounding from the plate, so they can be stopped or struck afresh.
     private var ringing: Set<UInt8> = []
+    /// Bumped each time a note is plucked, so a release timed for an earlier pluck of
+    /// the same note does not cut the new one short.
+    private var plucks: [UInt8: Int] = [:]
     private let strummer: AutoStrummer
     private var tapper = TapTempo()
     private var cancellables = Set<AnyCancellable>()
@@ -184,6 +187,21 @@ final class HarpPlayer: ObservableObject {
         store.noteOff(note)
         store.noteOn(note, velocity: StrumPlate.velocity(atWidth: loudness))
         ringing.insert(note)
+        plucks[note, default: 0] += 1
+        if let seconds = plateRing.seconds {
+            let pluck = plucks[note]
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                guard let self, plucks[note] == pluck, ringing.contains(note) else { return }
+                store.noteOff(note)
+                ringing.remove(note)
+            }
+        }
+    }
+
+    var plateRing: PlateRing { store.setup.plateRing }
+
+    func setPlateRing(_ ring: PlateRing) {
+        store.setPlateRing(ring)
     }
 
     func setTouchedStrings(_ strings: Set<Int>) {

@@ -55,3 +55,18 @@ final class PartsTests: XCTestCase {
         XCTAssertEqual(mix.volume, 0.7, "unmuting brings the level back")
     }
 }
+
+final class PlateRingTests: XCTestCase {
+    func testRingTimes() {
+        XCTAssertEqual(PlateRing.short.seconds, 0.4)
+        XCTAssertEqual(PlateRing.long.seconds, 3)
+        XCTAssertNil(PlateRing.untilChordChange.seconds, "the old behaviour, kept as a choice")
+    }
+
+    func testRingIsSavedAndStartsLong() throws {
+        XCTAssertEqual(try SetupStorage.decode(Data("{}".utf8)).plateRing, .long)
+        var setup = HarpSetup()
+        setup.plateRing = .short
+        XCTAssertEqual(try SetupStorage.decode(JSONEncoder().encode(setup)).plateRing, .short)
+    }
+}

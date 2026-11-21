@@ -206,3 +206,30 @@ nonisolated enum PlateScale: String, CaseIterable, Codable {
         return Set(intervals.map { (root + $0) % 12 })
     }
 }
+
+/// How long a plucked plate note sounds before it is released (Graham, 2026-11-21: on
+/// a synth, a note that rang until the next chord seemed to hang, since a synth keeps
+/// sounding until it is released; a harp fades by itself). A note played again before
+/// its time is struck afresh and timed from then.
+nonisolated enum PlateRing: String, CaseIterable, Codable {
+    case short, medium, long, untilChordChange
+
+    var title: String {
+        switch self {
+        case .short: return "Short"
+        case .medium: return "Medium"
+        case .long: return "Long"
+        case .untilChordChange: return "Until Chord"
+        }
+    }
+
+    /// Seconds before the note is released; nil to ring until the chord changes.
+    var seconds: Double? {
+        switch self {
+        case .short: return 0.4
+        case .medium: return 1.2
+        case .long: return 3
+        case .untilChordChange: return nil
+        }
+    }
+}

@@ -225,6 +225,10 @@ final class InstrumentStore: ObservableObject {
         setup.plateScale = scale
     }
 
+    func setPlateRing(_ ring: PlateRing) {
+        setup.plateRing = ring
+    }
+
     func setPlatePattern(_ pattern: PlatePattern) {
         setup.platePattern = pattern
     }
