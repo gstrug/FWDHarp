@@ -231,4 +231,12 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   pattern; HOLD stays on) beside AUTO above the pads. Top bar split to match the screen:
   ⓘ, KEY, RANGE, SCALE, MIX, PANIC over the pads; plate instrument/EDIT/FX in a
   300-wide group over the plate (top bar padding 20, gap 24, like the content).
+- 2026-11-21: MIDI out. `Models/MIDIOut.swift` (MIDIOutSettings in HarpSetup.midiOut:
+  off by default, internalSound, plate ch 1 / auto ch 2, destinations by CoreMIDI
+  unique ID; MIDIBytes), `Engine/MIDIOutput.swift` (virtual source "FWD Harp" +
+  MIDISend to chosen destinations; skips our own), `Engine/NoteRouter.swift` (ALL plate
+  and auto-strum notes: engine track per part unless internal sound off, + MIDI on the
+  part's channel; tracks sent notes, releases them on off/channel change/PANIC).
+  AutoStrummer now takes the router. MIDI chip (lit when on) → `Views/MIDIOutView.swift`.
+  Next: tempo sync (MIDI clock in, Link).
 
