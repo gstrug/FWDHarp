@@ -20,6 +20,7 @@ struct ContentView: View {
                 // can be played while its level is set.
                 VStack(alignment: .leading, spacing: 10) {
                     AutoStrumBar(player: player)
+                    RhythmBar(player: player)
                     if showMixer {
                         MixerPanel(player: player, onDone: { showMixer = false })
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -303,18 +304,106 @@ private struct AutoStrumBar: View {
             }
             .accessibilityLabel("Pattern: \(player.autoStrumPattern.title)")
 
-            if player.autoStrumPattern.isRhythmic {
-                StudioReadout(value: Binding(get: { player.tempo }, set: { player.setTempo($0) }),
-                              range: AutoStrum.tempoRange,
-                              defaultValue: AutoStrum.defaultTempo,
-                              unit: "BPM",
-                              accessibilityLabel: "Tempo",
-                              format: { String(format: "%.0f", $0) })
-                StudioTapButton(title: "TAP") { player.tapTempo() }
-                    .accessibilityLabel("Tap tempo")
-            }
+            // One tempo for auto-strum and the rhythm section.
+            StudioReadout(value: Binding(get: { player.tempo }, set: { player.setTempo($0) }),
+                          range: AutoStrum.tempoRange,
+                          defaultValue: AutoStrum.defaultTempo,
+                          unit: "BPM",
+                          accessibilityLabel: "Tempo",
+                          format: { String(format: "%.0f", $0) })
+            StudioTapButton(title: "TAP") { player.tapTempo() }
+                .accessibilityLabel("Tap tempo")
             Spacer(minLength: 0)
         }
+    }
+}
+
+/// The rhythm section: drums and a bass that follows the chord pads, on the same
+/// clock as auto-strum. START plays at once (with the style's intro first if INTRO is
+/// lit); SYNC instead waits for the first pad (auto-strum on) or the first strum (off).
+/// A/B and a new style change at the next bar; FILL fills to the end of the bar.
+private struct RhythmBar: View {
+    @ObservedObject var player: HarpPlayer
+
+    private var running: Bool { player.rhythm.running }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            StudioToggleChip(title: running ? "STOP" : "START",
+                             isOn: Binding(get: { running }, set: { _ in player.toggleRhythm() }),
+                             tint: .green,
+                             accessibilityLabel: "Start or stop the drums and bass")
+            StudioToggleChip(title: "SYNC",
+                             isOn: Binding(get: { player.isRhythmArmed }, set: { player.armRhythm($0) }),
+                             tint: .cyan,
+                             accessibilityLabel: "Start the drums and bass with the first pad or strum")
+                .disabled(running)
+                .opacity(running ? 0.45 : 1)
+            Menu {
+                ForEach(RhythmStyle.allCases, id: \.self) { style in
+                    Button {
+                        player.setRhythmStyle(style)
+                    } label: {
+                        if style == player.rhythmStyle {
+                            Label(style.title, systemImage: "checkmark")
+                        } else {
+                            Text(style.title)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(player.rhythmStyle.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(StudioStyle.displayText)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(StudioStyle.scaleText)
+                }
+                .studioWindow()
+            }
+            .accessibilityLabel("Rhythm style: \(player.rhythmStyle.title)")
+            ForEach(RhythmVariation.allCases, id: \.self) { variation in
+                StudioToggleChip(title: variation.title,
+                                 isOn: Binding(get: { player.rhythmVariation == variation },
+                                               set: { _ in player.setRhythmVariation(variation) }),
+                                 tint: StudioStyle.displayText,
+                                 accessibilityLabel: "Variation \(variation.title)")
+            }
+            StudioToggleChip(title: "INTRO",
+                             isOn: Binding(get: { player.rhythmIntro }, set: { player.setRhythmIntro($0) }),
+                             tint: .orange,
+                             accessibilityLabel: "Play the style's intro bar first")
+            StudioTapButton(title: "FILL") { player.fill() }
+                .disabled(!running || player.rhythm.intro)
+                .opacity(!running || player.rhythm.intro ? 0.45 : 1)
+                .accessibilityLabel("Fill to the end of the bar")
+            BeatLights(position: player.rhythm, beats: player.rhythmStyle.beatsPerBar)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// A light per beat of the bar: the one playing lit, the first brighter.
+private struct BeatLights: View {
+    let position: RhythmPosition
+    let beats: Int
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<max(beats, position.beat + 1), id: \.self) { beat in
+                Circle()
+                    .fill(color(for: beat))
+                    .frame(width: 10, height: 10)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func color(for beat: Int) -> Color {
+        guard position.running, beat == position.beat else { return Color(white: 0.22) }
+        if position.intro || position.fill { return .orange }
+        return beat == 0 ? .green : Color.green.opacity(0.6)
     }
 }
 

@@ -19,6 +19,8 @@ final class InstrumentStore: ObservableObject {
         switch part {
         case .plate: return UUID(uuidString: "6E0A7C8E-3B1F-4D5A-9C2E-0000000000A1")!
         case .auto: return UUID(uuidString: "6E0A7C8E-3B1F-4D5A-9C2E-0000000000A2")!
+        case .drums: return UUID(uuidString: "6E0A7C8E-3B1F-4D5A-9C2E-0000000000A3")!
+        case .bass: return UUID(uuidString: "6E0A7C8E-3B1F-4D5A-9C2E-0000000000A4")!
         }
     }
 
@@ -253,6 +255,10 @@ final class InstrumentStore: ObservableObject {
     func setTempo(_ tempo: Double) {
         setup.tempo = min(max(tempo.rounded(), AutoStrum.tempoRange.lowerBound), AutoStrum.tempoRange.upperBound)
     }
+
+    func setRhythmStyle(_ style: RhythmStyle) { setup.rhythmStyle = style }
+    func setRhythmVariation(_ variation: RhythmVariation) { setup.rhythmVariation = variation }
+    func setRhythmIntro(_ on: Bool) { setup.rhythmIntro = on }
 
     func setOctaveShift(_ shift: Int) {
         setup.octaveShift = min(max(shift, StrumPlate.octaveShiftRange.lowerBound),

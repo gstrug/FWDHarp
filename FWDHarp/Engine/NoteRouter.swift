@@ -42,8 +42,7 @@ nonisolated final class NoteRouter: @unchecked Sendable {
             midi.setDestinations(new.enabled ? new.destinations : [])
             // Release what the other end is holding if MIDI out went off or a part
             // moved channel: those note-offs would otherwise never be sent.
-            if old.enabled, !new.enabled || old.plateChannel != new.plateChannel
-                || old.autoChannel != new.autoChannel || old.destinations != new.destinations {
+            if old.enabled, !new.enabled || old.channels != new.channels || old.destinations != new.destinations {
                 releaseSentLocked(through: old)
             }
         }

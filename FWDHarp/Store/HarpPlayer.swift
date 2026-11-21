@@ -22,6 +22,12 @@ final class HarpPlayer: ObservableObject {
     /// app always opens with it off.
     @Published private(set) var isAutoStrumming = false
 
+    /// The rhythm section: running, and where in the bar, for the beat light.
+    @Published private(set) var rhythm = RhythmPosition()
+    /// SYNC: the rhythm waits and starts with the first pad (auto-strum on) or the
+    /// first strum (auto-strum off), rather than at START. Not saved.
+    @Published private(set) var isRhythmArmed = false
+
     /// Notes sounding from the plate, so they can be stopped or struck afresh.
     private var ringing: Set<UInt8> = []
     /// Bumped each time a note is plucked, so a release timed for an earlier pluck of
@@ -30,7 +36,8 @@ final class HarpPlayer: ObservableObject {
     /// While Held: how many fingers hold each note. The same note can be on two
     /// strings (the plate orders repeat notes), so it is released when the last lets go.
     private var held: [UInt8: Int] = [:]
-    private let strummer: AutoStrummer
+    /// One clock for auto-strum and the rhythm section, so they play together.
+    private let strummer: Conductor
     private var tapper = TapTempo()
     private var cancellables = Set<AnyCancellable>()
 
@@ -38,9 +45,16 @@ final class HarpPlayer: ObservableObject {
     /// @StateObject, created exactly once, and the store with it.
     init(store: InstrumentStore = InstrumentStore()) {
         self.store = store
-        strummer = AutoStrummer(router: store.router)
+        strummer = Conductor(router: store.router)
         strummer.setPattern(store.setup.autoStrumPattern)
         strummer.setTempo(store.setup.tempo)
+        strummer.setStyle(store.setup.rhythmStyle)
+        strummer.setVariation(store.setup.rhythmVariation)
+        strummer.setIntro(store.setup.rhythmIntro)
+        strummer.onPosition = { [weak self] position in
+            guard let self, position != rhythm else { return }
+            rhythm = position
+        }
         // Redraw when the key (in the store's setup) changes.
         store.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -102,6 +116,8 @@ final class HarpPlayer: ObservableObject {
         let changed = selection.current != before && selection.current != nil
         if changed { stopRinging() }
         syncAutoStrum(newPad: changed)
+        // SYNC with auto-strum on: the first chord pad starts the band.
+        if isRhythmArmed, isAutoStrumming, !pad.isModifier, chord != nil { startArmedRhythm() }
         // The same chord pad pressed again (Hold kept it sounding): auto-strum starts
         // its pattern again, so a single sweep can be swept again (Graham, 2026-11-21).
         if !pad.isModifier, !changed, selection.current == pad { strummer.retrigger() }
@@ -183,6 +199,48 @@ final class HarpPlayer: ObservableObject {
         if let bpm = tapper.tap(at: ProcessInfo.processInfo.systemUptime) { setTempo(bpm) }
     }
 
+    // MARK: Rhythm section
+
+    var rhythmStyle: RhythmStyle { store.setup.rhythmStyle }
+    var rhythmVariation: RhythmVariation { store.setup.rhythmVariation }
+    var rhythmIntro: Bool { store.setup.rhythmIntro }
+
+    func setRhythmStyle(_ style: RhythmStyle) {
+        store.setRhythmStyle(style)
+        strummer.setStyle(style)
+    }
+
+    func setRhythmVariation(_ variation: RhythmVariation) {
+        store.setRhythmVariation(variation)
+        strummer.setVariation(variation)
+    }
+
+    func setRhythmIntro(_ on: Bool) {
+        store.setRhythmIntro(on)
+        strummer.setIntro(on)
+    }
+
+    /// START / STOP: the rhythm section at once (an armed SYNC is dropped).
+    func toggleRhythm() {
+        isRhythmArmed = false
+        if strummer.isRhythmRunning { strummer.stopRhythm() } else { strummer.startRhythm() }
+    }
+
+    /// SYNC: wait for the first pad or strum. Lit while waiting.
+    func armRhythm(_ on: Bool) {
+        guard !strummer.isRhythmRunning else { isRhythmArmed = false; return }
+        isRhythmArmed = on
+    }
+
+    private func startArmedRhythm() {
+        isRhythmArmed = false
+        strummer.startRhythm()
+    }
+
+    func fill() {
+        strummer.fill()
+    }
+
     /// Tell the strummer the chord and plate as they are now.
     private func syncAutoStrum(newPad: Bool) {
         strummer.update(chord: chord, plateNotes: straightNotes,
@@ -197,6 +255,8 @@ final class HarpPlayer: ObservableObject {
     func pluck(string: Int, loudness: Double) -> UInt8? {
         let notes = plateNotes
         guard notes.indices.contains(string) else { return nil }
+        // SYNC with auto-strum off: the first strum starts the band.
+        if isRhythmArmed, !isAutoStrumming { startArmedRhythm() }
         let note = UInt8(notes[string])
         // Always released first, even if the plate did not start it: auto-strum may
         // be sounding the same note on the same instrument, and a second note-on with
@@ -248,6 +308,7 @@ final class HarpPlayer: ObservableObject {
     /// AUTO and HOLD stay as they are; auto-strum starts again with the next pad.
     func panic() {
         strummer.stop()
+        isRhythmArmed = false
         ringing.removeAll()
         held.removeAll()
         touchedStrings = []
@@ -267,6 +328,7 @@ final class HarpPlayer: ObservableObject {
         touchedStrings = []
         stopRinging()
         strummer.stop()
+        isRhythmArmed = false
         syncAutoStrum(newPad: false)
     }
 }

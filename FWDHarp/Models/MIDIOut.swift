@@ -12,9 +12,13 @@ nonisolated struct MIDIOutSettings: Codable, Equatable {
     /// off makes FWD Harp a controller only.
     var plateInternalSound = true
     var autoInternalSound = true
-    /// Channels 1–16, as people number them.
+    var drumsInternalSound = true
+    var bassInternalSound = true
+    /// Channels 1–16, as people number them. Drums on 10, General MIDI's drum channel.
     var plateChannel = 1
     var autoChannel = 2
+    var drumsChannel = 10
+    var bassChannel = 3
     /// Destinations sent to directly (hardware, or an app's own MIDI input), by their
     /// CoreMIDI unique ID, which stays the same across launches. Other apps can also
     /// simply choose "FWD Harp" as their input, which needs nothing chosen here.
@@ -25,26 +29,48 @@ nonisolated struct MIDIOutSettings: Codable, Equatable {
     init() {}
 
     func playsOwnSound(_ part: HarpPart) -> Bool {
-        part == .plate ? plateInternalSound : autoInternalSound
+        switch part {
+        case .plate: return plateInternalSound
+        case .auto: return autoInternalSound
+        case .drums: return drumsInternalSound
+        case .bass: return bassInternalSound
+        }
     }
 
     mutating func setPlaysOwnSound(_ on: Bool, for part: HarpPart) {
-        if part == .plate { plateInternalSound = on } else { autoInternalSound = on }
+        switch part {
+        case .plate: plateInternalSound = on
+        case .auto: autoInternalSound = on
+        case .drums: drumsInternalSound = on
+        case .bass: bassInternalSound = on
+        }
     }
 
     func channel(for part: HarpPart) -> Int {
-        part == .plate ? plateChannel : autoChannel
+        switch part {
+        case .plate: return plateChannel
+        case .auto: return autoChannel
+        case .drums: return drumsChannel
+        case .bass: return bassChannel
+        }
     }
 
     mutating func setChannel(_ channel: Int, for part: HarpPart) {
         let clamped = min(max(channel, Self.channelRange.lowerBound), Self.channelRange.upperBound)
-        if part == .plate { plateChannel = clamped } else { autoChannel = clamped }
+        switch part {
+        case .plate: plateChannel = clamped
+        case .auto: autoChannel = clamped
+        case .drums: drumsChannel = clamped
+        case .bass: bassChannel = clamped
+        }
     }
+
+    /// Every part's channel, so a change to any of them can be noticed.
+    var channels: [Int] { HarpPart.allCases.map(channel(for:)) }
 
     func normalized() -> MIDIOutSettings {
         var copy = self
-        copy.setChannel(plateChannel, for: .plate)
-        copy.setChannel(autoChannel, for: .auto)
+        for part in HarpPart.allCases { copy.setChannel(channel(for: part), for: part) }
         var seen = Set<Int32>()
         copy.destinations = destinations.filter { seen.insert($0).inserted }
         return copy
@@ -52,6 +78,7 @@ nonisolated struct MIDIOutSettings: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case enabled, plateInternalSound, autoInternalSound, plateChannel, autoChannel, destinations
+        case drumsInternalSound, bassInternalSound, drumsChannel, bassChannel
     }
 
     /// Read from files saved when one switch covered both parts.
@@ -67,6 +94,10 @@ nonisolated struct MIDIOutSettings: Codable, Equatable {
         plateChannel = try c.decodeIfPresent(Int.self, forKey: .plateChannel) ?? 1
         autoChannel = try c.decodeIfPresent(Int.self, forKey: .autoChannel) ?? 2
         destinations = try c.decodeIfPresent([Int32].self, forKey: .destinations) ?? []
+        drumsInternalSound = try c.decodeIfPresent(Bool.self, forKey: .drumsInternalSound) ?? true
+        bassInternalSound = try c.decodeIfPresent(Bool.self, forKey: .bassInternalSound) ?? true
+        drumsChannel = try c.decodeIfPresent(Int.self, forKey: .drumsChannel) ?? 10
+        bassChannel = try c.decodeIfPresent(Int.self, forKey: .bassChannel) ?? 3
     }
 }
 

@@ -51,8 +51,8 @@ struct MIDIOutView: View {
                     Text("Parts")
                 } footer: {
                     Text("Each part on its own channel, so they can play different instruments in another "
-                         + "app (10 is kept for drums, by custom). Own sound off: hear that part only in the "
-                         + "other app; both off makes FWD Harp purely a controller.")
+                         + "app (drums on 10, the General MIDI custom). Own sound off: hear that part only in "
+                         + "the other app; all off makes FWD Harp purely a controller.")
                 }
 
                 Section {

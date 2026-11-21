@@ -77,8 +77,19 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var autoSound: PartSound? = nil
     var plateMix = ChannelMix()
     var autoMix = ChannelMix()
+    /// The rhythm section's sounds: the built-in drum kit and a finger bass to start
+    /// (design brief), each with its own instrument, effects and channel.
+    var drumsSound = PartSound(builtInSound: GeneralMIDI.drumKit)
+    var bassSound = PartSound(builtInSound: PartSound.defaultBassBuiltInSound)
+    var drumsMix = ChannelMix()
+    var bassMix = ChannelMix()
     var masterVolume: Float = 1
     var midiOut = MIDIOutSettings()
+    /// The rhythm section's style, A or B, and whether it starts with its intro.
+    /// Whether it is running, and SYNC, are not saved: it always opens stopped.
+    var rhythmStyle: RhythmStyle = .rock
+    var rhythmVariation: RhythmVariation = .a
+    var rhythmIntro = false
 
     init() {}
 
@@ -99,19 +110,39 @@ nonisolated struct HarpSetup: Codable, Equatable {
 
     /// A part's own sound; nil for auto-strum when it plays through the plate's.
     func sound(of part: HarpPart) -> PartSound? {
-        part == .plate ? plateSound : autoSound
+        switch part {
+        case .plate: return plateSound
+        case .auto: return autoSound
+        case .drums: return drumsSound
+        case .bass: return bassSound
+        }
     }
 
     mutating func setSound(_ sound: PartSound, for part: HarpPart) {
-        if part == .plate { plateSound = sound } else { autoSound = sound }
+        switch part {
+        case .plate: plateSound = sound
+        case .auto: autoSound = sound
+        case .drums: drumsSound = sound
+        case .bass: bassSound = sound
+        }
     }
 
     func mix(of part: HarpPart) -> ChannelMix {
-        part == .plate ? plateMix : autoMix
+        switch part {
+        case .plate: return plateMix
+        case .auto: return autoMix
+        case .drums: return drumsMix
+        case .bass: return bassMix
+        }
     }
 
     mutating func setMix(_ mix: ChannelMix, for part: HarpPart) {
-        if part == .plate { plateMix = mix } else { autoMix = mix }
+        switch part {
+        case .plate: plateMix = mix
+        case .auto: autoMix = mix
+        case .drums: drumsMix = mix
+        case .bass: bassMix = mix
+        }
     }
 
     /// Whether the effect at `index` is silent: bypassed itself, or the chain is out.
@@ -134,6 +165,10 @@ nonisolated struct HarpSetup: Codable, Equatable {
         copy.autoSound = copy.autoSound?.normalized()
         copy.plateMix = copy.plateMix.normalized()
         copy.autoMix = copy.autoMix.normalized()
+        copy.drumsSound = copy.drumsSound.normalized()
+        copy.bassSound = copy.bassSound.normalized()
+        copy.drumsMix = copy.drumsMix.normalized()
+        copy.bassMix = copy.bassMix.normalized()
         copy.masterVolume = ChannelMix.clampVolume(copy.masterVolume, default: 1)
         copy.midiOut = copy.midiOut.normalized()
         copy.formatVersion = Self.currentFormatVersion
@@ -144,6 +179,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
         case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic
         case plateStrings, octaveShift, autoStrumPattern, tempo, platePattern, plateScale
         case autoSound, plateMix, autoMix, masterVolume, plateRing, midiOut
+        case drumsSound, bassSound, drumsMix, bassMix, rhythmStyle, rhythmVariation, rhythmIntro
     }
 
     /// Read from older files, never written.
@@ -179,18 +215,29 @@ nonisolated struct HarpSetup: Codable, Equatable {
         autoMix = try c.decodeIfPresent(ChannelMix.self, forKey: .autoMix) ?? ChannelMix()
         masterVolume = try c.decodeIfPresent(Float.self, forKey: .masterVolume) ?? 1
         midiOut = try c.decodeIfPresent(MIDIOutSettings.self, forKey: .midiOut) ?? MIDIOutSettings()
+        drumsSound = try c.decodeIfPresent(PartSound.self, forKey: .drumsSound)
+            ?? PartSound(builtInSound: GeneralMIDI.drumKit)
+        bassSound = try c.decodeIfPresent(PartSound.self, forKey: .bassSound)
+            ?? PartSound(builtInSound: PartSound.defaultBassBuiltInSound)
+        drumsMix = try c.decodeIfPresent(ChannelMix.self, forKey: .drumsMix) ?? ChannelMix()
+        bassMix = try c.decodeIfPresent(ChannelMix.self, forKey: .bassMix) ?? ChannelMix()
+        rhythmStyle = (try? c.decodeIfPresent(RhythmStyle.self, forKey: .rhythmStyle)) ?? .rock
+        rhythmVariation = (try? c.decodeIfPresent(RhythmVariation.self, forKey: .rhythmVariation)) ?? .a
+        rhythmIntro = try c.decodeIfPresent(Bool.self, forKey: .rhythmIntro) ?? false
     }
 }
 
 /// The parts that make sound, each with its own instrument, effects and mixer
-/// channel. The rhythm section's drums and bass will join them (design brief).
+/// channel: the plate, auto-strum, and the rhythm section's drums and bass.
 nonisolated enum HarpPart: String, CaseIterable, Codable {
-    case plate, auto
+    case plate, auto, drums, bass
 
     var title: String {
         switch self {
         case .plate: return "Plate"
         case .auto: return "Auto-Strum"
+        case .drums: return "Drums"
+        case .bass: return "Bass"
         }
     }
 }
@@ -201,6 +248,8 @@ nonisolated struct PartSound: Codable, Equatable {
     /// A built-in sound for auto-strum when it is first given its own: nylon guitar,
     /// to accompany the harp.
     static let defaultAutoBuiltInSound = 24
+    /// General MIDI 33, Electric Bass (finger), for the rhythm section's bass.
+    static let defaultBassBuiltInSound = 33
 
     var instrument: PluginInfo? = nil
     var instrumentState: Data? = nil

@@ -1,0 +1,426 @@
+import Foundation
+
+/// Where the rhythm section is, for the screen: running or not, the bar and beat,
+/// and whether the intro or a fill is playing.
+nonisolated struct RhythmPosition: Equatable {
+    var running = false
+    var bar = 0
+    var beat = 0
+    var intro = false
+    var fill = false
+}
+
+/// One clock for the rhythm section (drums and bass) and auto-strum, so they always
+/// play together (Graham, 2026-11-21: "autostrum synced to rhythm"). It runs on its own
+/// queue so the screen cannot hold it up, at 12 ticks a beat: sixteenths fall every 3
+/// ticks, triplets every 4, eighths every 6 (or on the third triplet when the style
+/// swings).
+///
+/// Each tick is due one tick after the previous tick was DUE (not when it ran), at the
+/// tempo as it is then, so delays never add up into drift and a tempo change never
+/// interrupts the beat (lesson learnt on 2026-11-21). Notes go through the NoteRouter
+/// to each part's instrument and MIDI out, sent the moment they are due: never stamped
+/// ahead (FWD lesson 5).
+///
+/// Auto-strum alone runs the clock from the first pad, as before. With the rhythm
+/// running, auto-strum's steps fall on the rhythm's grid, counted from its first bar.
+nonisolated final class Conductor: @unchecked Sendable {
+    static let ticksPerBeat = 12
+
+    private let router: NoteRouter
+    private let queue = DispatchQueue(label: "com.fwdharp.conductor", qos: .userInteractive)
+    private let lock = NSLock()
+    /// Called on the main thread when the beat or the rhythm's state changes.
+    var onPosition: ((RhythmPosition) -> Void)?
+
+    // MARK: State, guarded by `lock`
+
+    private var tempo: Double = AutoStrum.defaultTempo
+
+    // Auto-strum.
+    private var autoEnabled = false
+    private var pattern: AutoStrumPattern = .arpeggioUp
+    private var chord: Chord?
+    private var plateNotes: [Int] = []
+    private var scale: Set<Int>?
+    private var autoSounding: [UInt8] = []
+    /// Bumped to cancel a single sweep in progress.
+    private var sweepGeneration: UInt64 = 0
+
+    // The rhythm section.
+    private var style: RhythmStyle = .rock
+    private var pendingStyle: RhythmStyle?
+    private var variation: RhythmVariation = .a
+    private var pendingVariation: RhythmVariation?
+    private var introEnabled = false
+    private var rhythmOn = false
+    private var introActive = false
+    /// The bar a fill plays in, and the step it starts from.
+    private var fillBar: Int?
+    private var fillFromStep = 0
+    /// A crash on the next bar's first beat: after an intro or a fill.
+    private var crashNext = false
+    private var rhythmStartTick = 0
+    /// The chord the bass plays: the one held, or the last one if none is.
+    private var bassChord: Chord?
+    private var bassSounding: (note: UInt8, endTick: Int)?
+    private var drumsSounding: [(note: UInt8, releaseTick: Int)] = []
+
+    // The clock.
+    private var clockRunning = false
+    private var clockGeneration: UInt64 = 0
+    private var lastTick = -1
+    private var autoOriginTick = 0
+
+    init(router: NoteRouter) {
+        self.router = router
+    }
+
+    private func locked<T>(_ body: () -> T) -> T {
+        lock.lock(); defer { lock.unlock() }; return body()
+    }
+
+    // MARK: - Auto-strum
+
+    /// The chord to play now (nil: none), from the plate's notes. `newPad` is true when
+    /// a different chord pad was pressed, which is what triggers a single sweep.
+    func update(chord: Chord?, plateNotes: [Int], scale: Set<Int>?, newPad: Bool) {
+        locked {
+            let hadChord = self.chord != nil
+            self.chord = chord
+            self.plateNotes = plateNotes
+            self.scale = scale
+            if let chord { bassChord = chord }
+            if autoEnabled {
+                if chord == nil {
+                    releaseAutoLocked()
+                } else if pattern == .singleSweep {
+                    if newPad { sweepLocked() }
+                } else if !hadChord, clockRunning, !rhythmOn {
+                    // Auto-strum alone, picking up again: its pattern starts now.
+                    autoOriginTick = lastTick + 1
+                }
+            }
+            ensureClockLocked()
+        }
+    }
+
+    /// The chord pad sounding was pressed again (with Hold, it never stopped): sweep
+    /// again, or start the pattern again from its top. With the rhythm running the
+    /// pattern stays on the rhythm's grid.
+    func retrigger() {
+        locked {
+            guard autoEnabled, chord != nil else { return }
+            if pattern == .singleSweep {
+                sweepLocked()
+            } else if !rhythmOn {
+                releaseAutoLocked()
+                autoOriginTick = lastTick + 1
+            }
+        }
+    }
+
+    func setEnabled(_ on: Bool) {
+        locked {
+            autoEnabled = on
+            if !on {
+                releaseAutoLocked()
+            } else if chord != nil {
+                if pattern == .singleSweep { sweepLocked() } else { autoOriginTick = lastTick + 1 }
+            }
+            ensureClockLocked()
+        }
+    }
+
+    func setPattern(_ newPattern: AutoStrumPattern) {
+        locked {
+            guard newPattern != pattern else { return }
+            pattern = newPattern
+            releaseAutoLocked()
+            autoOriginTick = lastTick + 1
+            ensureClockLocked()
+        }
+    }
+
+    /// The tick already waiting keeps its time; every tick after it uses the new tempo.
+    func setTempo(_ newTempo: Double) {
+        locked { tempo = newTempo }
+    }
+
+    // MARK: - The rhythm section
+
+    func setStyle(_ newStyle: RhythmStyle) {
+        locked {
+            if rhythmOn { pendingStyle = newStyle } else { style = newStyle }
+        }
+    }
+
+    /// A or B: from the next bar while playing.
+    func setVariation(_ newVariation: RhythmVariation) {
+        locked {
+            if rhythmOn { pendingVariation = newVariation } else { variation = newVariation }
+        }
+    }
+
+    func setIntro(_ on: Bool) {
+        locked { introEnabled = on }
+    }
+
+    var isRhythmRunning: Bool { locked { rhythmOn } }
+
+    /// START, or the first pad or strum with SYNC: on the next tick, with the intro
+    /// first if it is on.
+    func startRhythm() {
+        locked {
+            guard !rhythmOn else { return }
+            rhythmOn = true
+            introActive = introEnabled
+            fillBar = nil
+            crashNext = false
+            if let pendingStyle { style = pendingStyle; self.pendingStyle = nil }
+            if let pendingVariation { variation = pendingVariation; self.pendingVariation = nil }
+            rhythmStartTick = clockRunning ? lastTick + 1 : 0
+            ensureClockLocked()
+            report(bar: 0, beat: 0)
+        }
+    }
+
+    /// STOP: at once, releasing the drums and bass. Auto-strum carries on if it is
+    /// playing.
+    func stopRhythm() {
+        locked {
+            guard rhythmOn else { return }
+            stopRhythmLocked()
+            ensureClockLocked()
+        }
+    }
+
+    /// FILL: to the end of this bar, or through the next if this one is nearly over;
+    /// then the style carries on, with a crash on the next bar.
+    func fill() {
+        locked {
+            guard rhythmOn, !introActive, fillBar == nil else { return }
+            let ticksPerBar = Self.ticksPerBeat * style.beatsPerBar
+            let elapsed = max(0, lastTick - rhythmStartTick)
+            let bar = elapsed / ticksPerBar
+            let tickInBar = elapsed % ticksPerBar
+            let ticksPerStep = Self.ticksPerBeat / style.stepsPerBeat
+            if tickInBar >= ticksPerBar * 3 / 4 {
+                fillBar = bar + 1
+                fillFromStep = 0
+            } else {
+                fillBar = bar
+                fillFromStep = tickInBar / ticksPerStep + 1
+            }
+            report(bar: bar, beat: tickInBar / Self.ticksPerBeat)
+        }
+    }
+
+    /// Stop everything and silence it: PANIC, leaving the screen, the app going away.
+    func stop() {
+        locked {
+            if rhythmOn { stopRhythmLocked() }
+            releaseAutoLocked()
+            sweepGeneration &+= 1
+            stopClockLocked()
+        }
+    }
+
+    // MARK: - Caller holds `lock`
+
+    private func stopRhythmLocked() {
+        // Auto-strum carries on in the same place in its pattern.
+        autoOriginTick = rhythmStartTick
+        rhythmOn = false
+        introActive = false
+        fillBar = nil
+        crashNext = false
+        releaseBassLocked()
+        for drum in drumsSounding { router.stop(.drums, note: drum.note) }
+        drumsSounding = []
+        reportStopped()
+    }
+
+    private var needsClock: Bool {
+        rhythmOn || (autoEnabled && chord != nil && pattern.isRhythmic)
+    }
+
+    private func ensureClockLocked() {
+        if needsClock, !clockRunning {
+            clockRunning = true
+            clockGeneration &+= 1
+            lastTick = -1
+            autoOriginTick = 0
+            if rhythmOn { rhythmStartTick = 0 }
+            schedule(tick: 0, at: .now())
+        } else if !needsClock, clockRunning {
+            stopClockLocked()
+        }
+    }
+
+    private func stopClockLocked() {
+        clockRunning = false
+        clockGeneration &+= 1
+        releaseAutoLocked()
+    }
+
+    private func releaseAutoLocked() {
+        for note in autoSounding { router.stop(.auto, note: note) }
+        autoSounding = []
+    }
+
+    private func releaseBassLocked() {
+        if let bass = bassSounding { router.stop(.bass, note: bass.note) }
+        bassSounding = nil
+    }
+
+    private func schedule(tick: Int, at due: DispatchTime) {
+        let token = clockGeneration
+        queue.asyncAfter(deadline: due) { [weak self] in
+            self?.fire(tick: tick, due: due, token: token)
+        }
+    }
+
+    private func fire(tick: Int, due: DispatchTime, token: UInt64) {
+        locked {
+            guard token == clockGeneration, clockRunning else { return }
+            lastTick = tick
+            releaseDueLocked(tick)
+            if rhythmOn { playRhythmLocked(tick) }
+            playAutoLocked(tick)
+            // From when this tick was due, at the tempo as it is now.
+            let bpm = min(max(tempo, AutoStrum.tempoRange.lowerBound), AutoStrum.tempoRange.upperBound)
+            let interval = 60 / bpm / Double(Self.ticksPerBeat)
+            schedule(tick: tick + 1, at: due + .nanoseconds(Int(interval * 1e9)))
+        }
+    }
+
+    private func releaseDueLocked(_ tick: Int) {
+        if let bass = bassSounding, bass.endTick <= tick { releaseBassLocked() }
+        drumsSounding.removeAll { drum in
+            guard drum.releaseTick <= tick else { return false }
+            router.stop(.drums, note: drum.note)
+            return true
+        }
+    }
+
+    private func playRhythmLocked(_ tick: Int) {
+        let elapsed = tick - rhythmStartTick
+        guard elapsed >= 0 else { return }
+        var ticksPerBar = Self.ticksPerBeat * style.beatsPerBar
+        var tickInBar = elapsed % ticksPerBar
+        var bar = elapsed / ticksPerBar
+
+        if tickInBar == 0 {
+            // A bar begins: the next style or variation, the end of an intro or fill.
+            if let next = pendingStyle {
+                style = next
+                pendingStyle = nil
+                // The bar is counted afresh in the new style's metre.
+                rhythmStartTick = tick
+                ticksPerBar = Self.ticksPerBeat * style.beatsPerBar
+                tickInBar = 0
+                bar = 0
+            }
+            if let next = pendingVariation { variation = next; pendingVariation = nil }
+            if introActive, bar >= 1 { introActive = false; crashNext = true }
+            if let fill = fillBar, bar > fill { fillBar = nil; crashNext = true }
+        }
+        if tickInBar % Self.ticksPerBeat == 0 {
+            report(bar: bar, beat: tickInBar / Self.ticksPerBeat)
+        }
+
+        let ticksPerStep = Self.ticksPerBeat / style.stepsPerBeat
+        guard tickInBar % ticksPerStep == 0 else { return }
+        let step = tickInBar / ticksPerStep
+        let main = style.bar(variation)
+        let bars: RhythmBar
+        if introActive {
+            bars = style.intro
+        } else if let fill = fillBar, fill == bar, step >= fillFromStep {
+            bars = style.fill
+        } else {
+            bars = main
+        }
+
+        var hits = bars.hits(at: step)
+        if crashNext, step == 0 {
+            hits.insert((DrumVoice.crash.note, 110), at: 0)
+            crashNext = false
+        }
+        for hit in hits {
+            router.stop(.drums, note: hit.note)
+            router.play(.drums, note: hit.note, velocity: hit.velocity)
+            drumsSounding.append((hit.note, tick + ticksPerStep))
+        }
+
+        // The bass follows the chord held, or the last one; it waits for a first chord.
+        let bassLine = bars.bass.isEmpty ? main : bars
+        if let event = bassLine.bassNote(at: step), let chord = bassChord,
+           let note = RhythmBass.note(event.degree, over: chord), (0...127).contains(note) {
+            releaseBassLocked()
+            let midi = UInt8(note)
+            router.play(.bass, note: midi, velocity: 100)
+            bassSounding = (midi, tick + event.steps * ticksPerStep)
+        }
+    }
+
+    private func playAutoLocked(_ tick: Int) {
+        guard autoEnabled, let chord, pattern.isRhythmic else { return }
+        let origin = rhythmOn ? rhythmStartTick : autoOriginTick
+        let at = tick - origin
+        guard at >= 0 else { return }
+        let beatTick = at % Self.ticksPerBeat
+        let beat = at / Self.ticksPerBeat
+        let step: Int
+        if pattern.stepsPerBeat == 1 {
+            guard beatTick == 0 else { return }
+            step = beat
+        } else {
+            // Eighths; the second swings onto the third triplet in a shuffle.
+            let offbeat = rhythmOn && style.swings ? 8 : 6
+            guard beatTick == 0 || beatTick == offbeat else { return }
+            step = beat * 2 + (beatTick == 0 ? 0 : 1)
+        }
+        releaseAutoLocked()
+        let notes = AutoStrum.notes(pattern, step: step, plateNotes: plateNotes, chord: chord, scale: scale)
+            .filter { (0...127).contains($0) }
+            .map { UInt8($0) }
+        for note in notes {
+            // Released first: the plate may be sounding it on the same instrument.
+            router.stop(.auto, note: note)
+            router.play(.auto, note: note, velocity: AutoStrum.velocity)
+        }
+        autoSounding = notes
+    }
+
+    /// One quick sweep up the whole plate. Its notes ring on until the next sweep or
+    /// the chord is let go, like hand strumming.
+    private func sweepLocked() {
+        sweepGeneration &+= 1
+        releaseAutoLocked()
+        let token = sweepGeneration
+        let notes = plateNotes.filter { (0...127).contains($0) }.map { UInt8($0) }
+        for (index, note) in notes.enumerated() {
+            queue.asyncAfter(deadline: .now() + Double(index) * AutoStrum.sweepGap) { [weak self] in
+                guard let self else { return }
+                locked {
+                    guard token == self.sweepGeneration, self.autoEnabled else { return }
+                    self.router.stop(.auto, note: note)
+                    self.router.play(.auto, note: note, velocity: AutoStrum.velocity)
+                    self.autoSounding.append(note)
+                }
+            }
+        }
+    }
+
+    private func report(bar: Int, beat: Int) {
+        let position = RhythmPosition(running: rhythmOn, bar: bar, beat: beat, intro: introActive,
+                                      fill: fillBar != nil)
+        DispatchQueue.main.async { [weak self] in self?.onPosition?(position) }
+    }
+
+    private func reportStopped() {
+        DispatchQueue.main.async { [weak self] in self?.onPosition?(RhythmPosition()) }
+    }
+}
