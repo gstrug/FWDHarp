@@ -15,10 +15,17 @@ struct ContentView: View {
             topBar
             Divider()
             HStack(spacing: 24) {
+                // MIX puts the mixer here, in place of the pads, so the plate beside it
+                // can be played while its level is set.
                 VStack(alignment: .leading, spacing: 10) {
                     AutoStrumBar(player: player)
-                    PadsView(player: player)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if showMixer {
+                        MixerPanel(player: player)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    } else {
+                        PadsView(player: player)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
                 VStack(spacing: 10) {
                     PlateControls(player: player)
@@ -30,7 +37,6 @@ struct ContentView: View {
             .padding(20)
         }
         .background(Color(white: 0.08).ignoresSafeArea())
-        .sheet(isPresented: $showMixer) { MixerView(player: player) }
         .sheet(isPresented: $showCredits) { CreditsView() }
         .loadingOverlay(store)
         // A safe moment to keep the instruments' sounds and save (FWD lesson 3).
@@ -60,8 +66,11 @@ struct ContentView: View {
             keyMenu
             PartInstrumentButtons(store: store, part: .plate)
             EffectsToggleButton(store: store, part: .plate)
-            StudioTapButton(title: "MIX") { showMixer = true }
-                .accessibilityLabel("Mixer")
+            StudioToggleChip(title: "MIX", isOn: $showMixer, tint: StudioStyle.displayText,
+                             accessibilityLabel: "Mixer, in place of the pads")
+
+            StudioTapButton(title: "PANIC") { player.panic() }
+                .accessibilityLabel("MIDI panic: stop every sounding note")
 
             Button { showCredits = true } label: {
                 Image(systemName: "info.circle")

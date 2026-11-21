@@ -178,13 +178,26 @@ final class HarpPlayer: ObservableObject {
         let notes = plateNotes
         guard notes.indices.contains(string) else { return }
         let note = UInt8(notes[string])
-        if ringing.contains(note) { store.noteOff(note) }
+        // Always released first, even if the plate did not start it: auto-strum may
+        // be sounding the same note on the same instrument, and a second note-on with
+        // no note-off between can leave a note stuck in some instruments.
+        store.noteOff(note)
         store.noteOn(note, velocity: StrumPlate.velocity(atWidth: loudness))
         ringing.insert(note)
     }
 
     func setTouchedStrings(_ strings: Set<Int>) {
         if strings != touchedStrings { touchedStrings = strings }
+    }
+
+    /// MIDI panic, for a stuck note: stop auto-strum's notes and the plate's, and send
+    /// every instrument All Sound Off, All Notes Off and a note-off for every note.
+    /// AUTO and HOLD stay as they are; auto-strum starts again with the next pad.
+    func panic() {
+        strummer.stop()
+        ringing.removeAll()
+        touchedStrings = []
+        store.engine.panic()
     }
 
     func stopRinging() {

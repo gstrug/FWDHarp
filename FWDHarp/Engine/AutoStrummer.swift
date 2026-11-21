@@ -138,6 +138,8 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
                 .filter { (0...127).contains($0) }
                 .map { UInt8($0) }
             for note in notes {
+                // Released first: the plate may be sounding it on the same instrument.
+                engine.stopNote(trackID: partID, midiNote: note)
                 engine.playNote(trackID: partID, midiNote: note, velocity: AutoStrum.velocity)
             }
             sounding = notes
@@ -160,6 +162,7 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
                 guard let self else { return }
                 locked {
                     guard token == self.generation else { return }
+                    self.engine.stopNote(trackID: self.partID, midiNote: note)
                     self.engine.playNote(trackID: self.partID, midiNote: note, velocity: AutoStrum.velocity)
                     self.sounding.append(note)
                 }
