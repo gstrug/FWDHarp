@@ -18,14 +18,23 @@ final class HarpPlayer: ObservableObject {
     /// Strings with a finger on them, to light them.
     @Published private(set) var touchedStrings: Set<Int> = []
 
+    /// Auto-strum on: pressing a pad sounds it, in the chosen pattern. Not saved; the
+    /// app always opens with it off.
+    @Published private(set) var isAutoStrumming = false
+
     /// Notes sounding from the plate, so they can be stopped or struck afresh.
     private var ringing: Set<UInt8> = []
+    private let strummer: AutoStrummer
+    private var tapper = TapTempo()
     private var cancellables = Set<AnyCancellable>()
 
     /// Makes its own InstrumentStore by default: the screen holds one HarpPlayer as a
     /// @StateObject, created exactly once, and the store with it.
     init(store: InstrumentStore = InstrumentStore()) {
         self.store = store
+        strummer = AutoStrummer(engine: store.engine, partID: InstrumentStore.partID)
+        strummer.setPattern(store.setup.autoStrumPattern)
+        strummer.setTempo(store.setup.tempo)
         // Redraw when the key (in the store's setup) changes.
         store.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -56,34 +65,72 @@ final class HarpPlayer: ObservableObject {
     func press(_ pad: ChordPad) {
         let before = selection.current
         selection.press(pad)
-        if let now = selection.current, now != before { stopRinging() }
+        let changed = selection.current != before && selection.current != nil
+        if changed { stopRinging() }
+        syncAutoStrum(newPad: changed)
     }
 
     func release(_ pad: ChordPad) {
         let before = selection.current
         selection.release(pad)
         // Lifting one of two held pads hands over to the other: that is a change too.
-        if let now = selection.current, now != before { stopRinging() }
+        let changed = selection.current != before && selection.current != nil
+        if changed { stopRinging() }
+        syncAutoStrum(newPad: changed)
     }
 
     /// Hold: the last chord stays chosen after the left hand lifts. Not saved; the app
     /// always opens with it off.
     func setHolding(_ on: Bool) {
         selection.setHolding(on)
+        syncAutoStrum(newPad: false)
     }
 
     func setPlateOctaves(_ octaves: Int) {
         store.setPlateOctaves(octaves)
+        syncAutoStrum(newPad: false)
     }
 
     func shiftOctave(by step: Int) {
         store.setOctaveShift(octaveShift + step)
+        syncAutoStrum(newPad: false)
     }
 
     func setKey(_ key: MajorKey) {
         guard key != self.key else { return }
         stopRinging()
         store.setKey(key)
+        syncAutoStrum(newPad: false)
+    }
+
+    // MARK: Auto-strum
+
+    var autoStrumPattern: AutoStrumPattern { store.setup.autoStrumPattern }
+    var tempo: Double { store.setup.tempo }
+
+    func setAutoStrumming(_ on: Bool) {
+        isAutoStrumming = on
+        syncAutoStrum(newPad: false)
+        strummer.setEnabled(on)
+    }
+
+    func setAutoStrumPattern(_ pattern: AutoStrumPattern) {
+        store.setAutoStrumPattern(pattern)
+        strummer.setPattern(pattern)
+    }
+
+    func setTempo(_ tempo: Double) {
+        store.setTempo(tempo)
+        strummer.setTempo(store.setup.tempo)
+    }
+
+    func tapTempo() {
+        if let bpm = tapper.tap(at: ProcessInfo.processInfo.systemUptime) { setTempo(bpm) }
+    }
+
+    /// Tell the strummer the chord and plate as they are now.
+    private func syncAutoStrum(newPad: Bool) {
+        strummer.update(chord: chord, plateNotes: plateNotes, newPad: newPad)
     }
 
     // MARK: Plate
@@ -112,5 +159,7 @@ final class HarpPlayer: ObservableObject {
         selection.releaseAll()
         touchedStrings = []
         stopRinging()
+        strummer.stop()
+        syncAutoStrum(newPad: false)
     }
 }

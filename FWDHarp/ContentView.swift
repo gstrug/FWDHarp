@@ -18,8 +18,11 @@ struct ContentView: View {
             topBar
             Divider()
             HStack(spacing: 24) {
-                PadsView(player: player)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(alignment: .leading, spacing: 10) {
+                    AutoStrumBar(player: player)
+                    PadsView(player: player)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
                 VStack(spacing: 10) {
                     PlateControls(player: player)
                     StrumPlateView(player: player)
@@ -80,6 +83,7 @@ struct ContentView: View {
         // A safe moment to keep the instrument's sound and save (FWD lesson 3).
         .onChange(of: scenePhase) { phase in
             if phase == .background {
+                player.setAutoStrumming(false)
                 player.releaseAll()
                 store.captureAndSave()
             }
@@ -105,6 +109,7 @@ struct ContentView: View {
                                            set: { player.setHolding($0) }),
                              tint: .orange,
                              accessibilityLabel: "Hold: keep the last chord after lifting your hand")
+            RangeChips(player: player)
             Spacer()
             keyMenu
             Button { showPicker = true } label: {
@@ -170,13 +175,12 @@ struct ContentView: View {
     }
 }
 
-/// Above the plate: its range (more octaves, more strings in the same height) and
-/// the octave buttons that move it up or down.
-private struct PlateControls: View {
+/// The plate's range, beside Hold: more octaves, more strings in the same height.
+private struct RangeChips: View {
     @ObservedObject var player: HarpPlayer
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Text("RANGE")
                 .font(.system(size: 11, weight: .bold)).tracking(0.8)
                 .foregroundStyle(StudioStyle.scaleText)
@@ -186,9 +190,19 @@ private struct PlateControls: View {
                     .onTapGesture { player.setPlateOctaves(octaves) }
                     .accessibilityElement()
                     .accessibilityAddTraits(player.plateOctaves == octaves ? [.isButton, .isSelected] : .isButton)
-                    .accessibilityLabel("\(octaves) octaves")
+                    .accessibilityLabel("Range \(octaves) octaves")
             }
-            Spacer(minLength: 4)
+        }
+    }
+}
+
+/// Above the plate: the octave buttons that move it up or down.
+private struct PlateControls: View {
+    @ObservedObject var player: HarpPlayer
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Spacer(minLength: 0)
             Text("OCT")
                 .font(.system(size: 11, weight: .bold)).tracking(0.8)
                 .foregroundStyle(StudioStyle.scaleText)
@@ -201,6 +215,7 @@ private struct PlateControls: View {
                 .accessibilityLabel("Octave \(player.octaveShift)")
             octaveButton("chevron.up", step: 1, label: "Octave up",
                          enabled: player.octaveShift < StrumPlate.octaveShiftRange.upperBound)
+            Spacer(minLength: 0)
         }
     }
 
@@ -216,6 +231,58 @@ private struct PlateControls: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .accessibilityLabel(label)
+    }
+}
+
+/// Above the pads: auto-strum on and off, its pattern, and its tempo (drag the
+/// number, or tap TAP in time).
+private struct AutoStrumBar: View {
+    @ObservedObject var player: HarpPlayer
+
+    var body: some View {
+        HStack(spacing: 10) {
+            StudioToggleChip(title: "AUTO",
+                             isOn: Binding(get: { player.isAutoStrumming },
+                                           set: { player.setAutoStrumming($0) }),
+                             tint: .green,
+                             accessibilityLabel: "Auto-strum: pressing a pad plays the pattern")
+            Menu {
+                ForEach(AutoStrumPattern.allCases, id: \.self) { pattern in
+                    Button {
+                        player.setAutoStrumPattern(pattern)
+                    } label: {
+                        if pattern == player.autoStrumPattern {
+                            Label(pattern.title, systemImage: "checkmark")
+                        } else {
+                            Text(pattern.title)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(player.autoStrumPattern.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(StudioStyle.displayText)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(StudioStyle.scaleText)
+                }
+                .studioWindow()
+            }
+            .accessibilityLabel("Pattern: \(player.autoStrumPattern.title)")
+
+            if player.autoStrumPattern.isRhythmic {
+                StudioReadout(value: Binding(get: { player.tempo }, set: { player.setTempo($0) }),
+                              range: AutoStrum.tempoRange,
+                              defaultValue: AutoStrum.defaultTempo,
+                              unit: "BPM",
+                              accessibilityLabel: "Tempo",
+                              format: { String(format: "%.0f", $0) })
+                StudioTapButton(title: "TAP") { player.tapTempo() }
+                    .accessibilityLabel("Tap tempo")
+            }
+            Spacer(minLength: 0)
+        }
     }
 }
 

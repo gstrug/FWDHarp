@@ -30,7 +30,8 @@ nonisolated struct PluginSlot: Codable, Identifiable, Equatable {
 }
 
 /// Everything FWD Harp remembers between launches: the instrument and its sound, the
-/// effects after it, the key, and the plate's range and octave. Saved automatically (see SetupStorage).
+/// effects after it, the key, the plate's range and octave, and auto-strum's pattern
+/// and tempo. Saved automatically (see SetupStorage).
 ///
 /// Every field is optional or defaulted and the decoder is tolerant, so a file from a
 /// later or earlier version still opens: settings it does not know are simply left at
@@ -61,6 +62,9 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var plateOctaves: Int = StrumPlate.minimumOctaves
     /// The plate moved up or down by whole octaves (StrumPlate.octaveShiftRange).
     var octaveShift: Int = 0
+    /// Auto-strum's pattern and speed. Whether it is on is not saved: it starts off.
+    var autoStrumPattern: AutoStrumPattern = .arpeggioUp
+    var tempo: Double = AutoStrum.defaultTempo
 
     init() {}
 
@@ -83,13 +87,14 @@ nonisolated struct HarpSetup: Codable, Equatable {
         if !(0..<12).contains(copy.keyTonic) { copy.keyTonic = 0 }
         if !StrumPlate.octaveRange.contains(copy.plateOctaves) { copy.plateOctaves = StrumPlate.minimumOctaves }
         if !StrumPlate.octaveShiftRange.contains(copy.octaveShift) { copy.octaveShift = 0 }
+        if !AutoStrum.tempoRange.contains(copy.tempo) || !copy.tempo.isFinite { copy.tempo = AutoStrum.defaultTempo }
         copy.formatVersion = Self.currentFormatVersion
         return copy
     }
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic
-        case plateOctaves, octaveShift
+        case plateOctaves, octaveShift, autoStrumPattern, tempo
     }
 
     init(from decoder: Decoder) throws {
@@ -103,5 +108,8 @@ nonisolated struct HarpSetup: Codable, Equatable {
         keyTonic = try c.decodeIfPresent(Int.self, forKey: .keyTonic) ?? 0
         plateOctaves = try c.decodeIfPresent(Int.self, forKey: .plateOctaves) ?? StrumPlate.minimumOctaves
         octaveShift = try c.decodeIfPresent(Int.self, forKey: .octaveShift) ?? 0
+        // A pattern this version does not know (from a later one) falls back.
+        autoStrumPattern = (try? c.decodeIfPresent(AutoStrumPattern.self, forKey: .autoStrumPattern)) ?? .arpeggioUp
+        tempo = try c.decodeIfPresent(Double.self, forKey: .tempo) ?? AutoStrum.defaultTempo
     }
 }
