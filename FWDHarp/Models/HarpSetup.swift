@@ -79,6 +79,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var plateMix = ChannelMix()
     var autoMix = ChannelMix()
     var masterVolume: Float = 1
+    var midiOut = MIDIOutSettings()
 
     init() {}
 
@@ -131,6 +132,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
         copy.plateMix = copy.plateMix.normalized()
         copy.autoMix = copy.autoMix.normalized()
         copy.masterVolume = ChannelMix.clampVolume(copy.masterVolume, default: 1)
+        copy.midiOut = copy.midiOut.normalized()
         copy.formatVersion = Self.currentFormatVersion
         return copy
     }
@@ -138,7 +140,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic
         case plateOctaves, octaveShift, autoStrumPattern, tempo, platePattern, plateScale
-        case autoSound, plateMix, autoMix, masterVolume, plateRing
+        case autoSound, plateMix, autoMix, masterVolume, plateRing, midiOut
     }
 
     init(from decoder: Decoder) throws {
@@ -162,6 +164,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
         plateMix = try c.decodeIfPresent(ChannelMix.self, forKey: .plateMix) ?? ChannelMix()
         autoMix = try c.decodeIfPresent(ChannelMix.self, forKey: .autoMix) ?? ChannelMix()
         masterVolume = try c.decodeIfPresent(Float.self, forKey: .masterVolume) ?? 1
+        midiOut = try c.decodeIfPresent(MIDIOutSettings.self, forKey: .midiOut) ?? MIDIOutSettings()
     }
 }
 

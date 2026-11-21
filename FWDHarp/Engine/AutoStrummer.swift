@@ -1,9 +1,8 @@
 import Foundation
 
 /// Plays the auto-strum pattern in time, on its own queue so the screen cannot hold it
-/// up. Notes go straight to the engine (thread-safe, and it holds MIDI back while a
-/// plugin loads) and are sent the moment they are due: never stamped ahead (FWD
-/// lesson 5).
+/// up. Notes go through the NoteRouter (to auto-strum's instrument, and MIDI out on its
+/// channel) and are sent the moment they are due: never stamped ahead (FWD lesson 5).
 ///
 /// Each step is due one interval after the moment the previous step was DUE (not when
 /// it actually ran), so small delays never add up into drift. A tempo change takes
@@ -12,9 +11,7 @@ import Foundation
 /// moved (Graham, 2026-11-21). A chord change keeps the beat going; lifting every pad
 /// (with Hold off) stops it.
 nonisolated final class AutoStrummer: @unchecked Sendable {
-    private let engine: AudioEngineManager
-    /// The track auto-strum's notes go to. Guarded by `lock`.
-    private var partID: UUID
+    private let router: NoteRouter
     private let queue = DispatchQueue(label: "com.fwdharp.autostrum", qos: .userInteractive)
     private let lock = NSLock()
 
@@ -29,9 +26,8 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
     private var running = false
     private var sounding: [UInt8] = []
 
-    init(engine: AudioEngineManager, partID: UUID) {
-        self.engine = engine
-        self.partID = partID
+    init(router: NoteRouter) {
+        self.router = router
     }
 
     private func locked<T>(_ body: () -> T) -> T {
@@ -52,16 +48,6 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
             } else if !running {
                 startLocked()
             }
-        }
-    }
-
-    /// Send the notes to another track: auto-strum given its own instrument, or sent
-    /// back through the plate's. What is sounding stops first, on the old track.
-    func setTarget(_ trackID: UUID) {
-        locked {
-            guard trackID != partID else { return }
-            releaseLocked()
-            partID = trackID
         }
     }
 
@@ -119,7 +105,7 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
     }
 
     private func releaseLocked() {
-        for note in sounding { engine.stopNote(trackID: partID, midiNote: note) }
+        for note in sounding { router.stop(.auto, note: note) }
         sounding = []
     }
 
@@ -139,8 +125,8 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
                 .map { UInt8($0) }
             for note in notes {
                 // Released first: the plate may be sounding it on the same instrument.
-                engine.stopNote(trackID: partID, midiNote: note)
-                engine.playNote(trackID: partID, midiNote: note, velocity: AutoStrum.velocity)
+                router.stop(.auto, note: note)
+                router.play(.auto, note: note, velocity: AutoStrum.velocity)
             }
             sounding = notes
             // From when this step was due, at the tempo as it is now.
@@ -162,8 +148,8 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
                 guard let self else { return }
                 locked {
                     guard token == self.generation else { return }
-                    self.engine.stopNote(trackID: self.partID, midiNote: note)
-                    self.engine.playNote(trackID: self.partID, midiNote: note, velocity: AutoStrum.velocity)
+                    self.router.stop(.auto, note: note)
+                    self.router.play(.auto, note: note, velocity: AutoStrum.velocity)
                     self.sounding.append(note)
                 }
             }

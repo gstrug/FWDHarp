@@ -8,6 +8,7 @@ struct ContentView: View {
     private var store: InstrumentStore { player.store }
     @State private var showMixer = false
     @State private var showCredits = false
+    @State private var showMIDI = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -38,6 +39,7 @@ struct ContentView: View {
         }
         .background(Color(white: 0.08).ignoresSafeArea())
         .sheet(isPresented: $showCredits) { CreditsView() }
+        .sheet(isPresented: $showMIDI) { MIDIOutView(store: store) }
         .loadingOverlay(store)
         // A safe moment to keep the instruments' sounds and save (FWD lesson 3).
         .onChange(of: scenePhase) { phase in
@@ -70,6 +72,13 @@ struct ContentView: View {
                 Spacer(minLength: 8)
                 StudioToggleChip(title: "MIX", isOn: $showMixer, tint: StudioStyle.displayText,
                                  accessibilityLabel: "Mixer, in place of the pads")
+                // Lit while MIDI out is on; opens its settings.
+                StudioChipLabel(title: "MIDI", tint: .cyan, look: store.midiOut.enabled ? .on : .off)
+                    .onTapGesture { showMIDI = true }
+                    .accessibilityElement()
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("MIDI out")
+                    .accessibilityValue(store.midiOut.enabled ? "On" : "Off")
                 StudioTapButton(title: "PANIC") { player.panic() }
                     .accessibilityLabel("MIDI panic: stop every sounding note")
             }

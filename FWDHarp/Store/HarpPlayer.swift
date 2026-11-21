@@ -38,7 +38,7 @@ final class HarpPlayer: ObservableObject {
     /// @StateObject, created exactly once, and the store with it.
     init(store: InstrumentStore = InstrumentStore()) {
         self.store = store
-        strummer = AutoStrummer(engine: store.engine, partID: store.soundingTrackID(for: .auto))
+        strummer = AutoStrummer(router: store.router)
         strummer.setPattern(store.setup.autoStrumPattern)
         strummer.setTempo(store.setup.tempo)
         // Redraw when the key (in the store's setup) changes.
@@ -156,8 +156,11 @@ final class HarpPlayer: ObservableObject {
 
     /// Give auto-strum its own instrument, or play it through the plate's.
     func setAutoHasOwnSound(_ own: Bool) {
+        // Stopped first, so what is sounding is released on the instrument that
+        // started it; then picked up again on the new one with the chord held.
+        strummer.stop()
         store.setAutoHasOwnSound(own)
-        strummer.setTarget(store.soundingTrackID(for: .auto))
+        syncAutoStrum(newPad: false)
     }
 
     func setAutoStrumming(_ on: Bool) {
@@ -248,6 +251,7 @@ final class HarpPlayer: ObservableObject {
         held.removeAll()
         touchedStrings = []
         store.engine.panic()
+        store.router.panicMIDI()
     }
 
     func stopRinging() {

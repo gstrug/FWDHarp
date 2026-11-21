@@ -33,7 +33,9 @@ let package = Package(
                 "Engine/AudioLevel.swift",
                 "Engine/PluginManager.swift",
                 "Engine/MIDIInputManager.swift",
-                "Engine/AutoStrummer.swift"
+                "Engine/AutoStrummer.swift",
+                "Engine/MIDIOutput.swift",
+                "Engine/NoteRouter.swift"
             ],
             sources: [
                 "Models/Harmony.swift",
@@ -44,6 +46,7 @@ let package = Package(
                 "Models/MIDIMessage.swift",
                 "Models/Pads.swift",
                 "Models/AutoStrum.swift",
+                "Models/MIDIOut.swift",
                 "Models/StrumPlate.swift",
                 "Store/SetupStorage.swift"
             ]

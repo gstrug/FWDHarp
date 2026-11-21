@@ -34,6 +34,9 @@ final class InstrumentStore: ObservableObject {
     let levels: LevelMonitor
 
     let engine = AudioEngineManager.shared
+    /// Every note of the plate and auto-strum goes through here: to its instrument,
+    /// and MIDI out on its channel.
+    let router: NoteRouter
     private var loads = PluginLoadTracker()
     private var saveWorkItem: DispatchWorkItem?
     /// Writes happen here, off the main thread, from a copy of the setup: saving never
@@ -49,6 +52,7 @@ final class InstrumentStore: ObservableObject {
         }
         let levels = LevelMonitor()
         self.levels = levels
+        router = NoteRouter(engine: AudioEngineManager.shared)
         levelBatcher = LevelBatcher { tracks, master in
             if !tracks.isEmpty {
                 var merged = levels.trackLevels
@@ -82,6 +86,13 @@ final class InstrumentStore: ObservableObject {
         engine.onMasterLevelUpdate = { level in batcher.master(level) }
         buildParts()
         startMIDIInput()
+        router.setSettings(setup.midiOut)
+        updateRoutes()
+    }
+
+    /// Tell the router which engine track each part sounds on.
+    private func updateRoutes() {
+        for part in HarpPart.allCases { router.setTrack(soundingTrackID(for: part), for: part) }
     }
 
     /// Put each part's instrument, effects and mixer settings into the engine.
@@ -144,6 +155,7 @@ final class InstrumentStore: ObservableObject {
             isLoading = !loads.isEmpty
             setup.autoSound = nil
         }
+        updateRoutes()
     }
 
     private func updateSound(of part: HarpPart, _ change: (inout PartSound) -> Void) {
@@ -276,13 +288,25 @@ final class InstrumentStore: ObservableObject {
 
     // MARK: - Notes
 
-    /// The plate's notes, from hand strumming.
+    /// The plate's notes, from hand strumming: to its instrument and MIDI out.
     func noteOn(_ note: UInt8, velocity: UInt8 = 100) {
-        engine.playNote(trackID: Self.trackID(for: .plate), midiNote: note, velocity: velocity)
+        router.play(.plate, note: note, velocity: velocity)
     }
 
     func noteOff(_ note: UInt8) {
-        engine.stopNote(trackID: Self.trackID(for: .plate), midiNote: note)
+        router.stop(.plate, note: note)
+    }
+
+    // MARK: - MIDI out
+
+    var midiOut: MIDIOutSettings { setup.midiOut }
+
+    func setMIDIOut(_ settings: MIDIOutSettings) {
+        let soundWasOn = setup.midiOut.internalSound
+        setup.midiOut = settings.normalized()
+        router.setSettings(setup.midiOut)
+        // FWD Harp's own sound switched off: silence what its instruments are playing.
+        if soundWasOn, !setup.midiOut.internalSound { engine.allNotesOff() }
     }
 
     /// A MIDI keyboard plays the plate's instrument directly: its notes, sustain pedal,
