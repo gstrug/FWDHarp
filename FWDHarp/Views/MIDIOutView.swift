@@ -25,34 +25,34 @@ struct MIDIOutView: View {
                     Text("Other apps can choose \"FWD Harp\" as their MIDI input.")
                 }
 
+                // One row per part: its MIDI channel and whether FWD Harp plays it too.
                 Section {
                     ForEach(HarpPart.allCases, id: \.self) { part in
-                        Toggle(part.title, isOn: Binding(
-                            get: { settings.playsOwnSound(part) },
-                            set: { on in change { $0.setPlaysOwnSound(on, for: part) } }))
-                    }
-                } header: {
-                    Text("Play FWD Harp's own sound")
-                } footer: {
-                    Text("Switch a part off to hear it only in the other app. Both off makes "
-                         + "FWD Harp purely a controller.")
-                }
-
-                Section {
-                    ForEach(HarpPart.allCases, id: \.self) { part in
-                        Picker(part.title, selection: Binding(
-                            get: { settings.channel(for: part) },
-                            set: { channel in change { $0.setChannel(channel, for: part) } })) {
-                            ForEach(Array(MIDIOutSettings.channelRange), id: \.self) { channel in
-                                Text("Channel \(channel)").tag(channel)
+                        HStack(spacing: 16) {
+                            Text(part.title)
+                            Spacer()
+                            Picker("\(part.title) channel", selection: Binding(
+                                get: { settings.channel(for: part) },
+                                set: { channel in change { $0.setChannel(channel, for: part) } })) {
+                                ForEach(Array(MIDIOutSettings.channelRange), id: \.self) { channel in
+                                    Text("Channel \(channel)").tag(channel)
+                                }
                             }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            Toggle("Own sound", isOn: Binding(
+                                get: { settings.playsOwnSound(part) },
+                                set: { on in change { $0.setPlaysOwnSound(on, for: part) } }))
+                                .fixedSize()
+                                .accessibilityLabel("Play \(part.title) in FWD Harp too")
                         }
                     }
                 } header: {
-                    Text("Channels")
+                    Text("Parts")
                 } footer: {
-                    Text("Each part on its own channel, so they can play different instruments "
-                         + "in another app. Channel 10 is kept for drums, by custom.")
+                    Text("Each part on its own channel, so they can play different instruments in another "
+                         + "app (10 is kept for drums, by custom). Own sound off: hear that part only in the "
+                         + "other app; both off makes FWD Harp purely a controller.")
                 }
 
                 Section {

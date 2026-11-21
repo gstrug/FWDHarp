@@ -21,7 +21,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     AutoStrumBar(player: player)
                     if showMixer {
-                        MixerPanel(player: player)
+                        MixerPanel(player: player, onDone: { showMixer = false })
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     } else {
                         PadsView(player: player)
@@ -77,6 +77,7 @@ struct ContentView: View {
                     .accessibilityValue(store.midiOut.enabled ? "On" : "Off")
                 StudioTapButton(title: "PANIC") { player.panic() }
                     .accessibilityLabel("MIDI panic: stop every sounding note")
+                CPUReadout()
             }
             Spacer(minLength: 8)
             // Everything that belongs to the plate, on the right over it: its range and
@@ -314,6 +315,34 @@ private struct AutoStrumBar: View {
             }
             Spacer(minLength: 0)
         }
+    }
+}
+
+/// Process CPU load, as a fraction of one core, as in FWD Sequencer. Hosted plugins
+/// are where the app spends its time; crackle and static start when this runs out.
+private struct CPUReadout: View {
+    @StateObject private var monitor = CPUMonitor()
+
+    private var tint: Color {
+        monitor.load >= CPUMonitor.warningLoad ? .orange
+            : monitor.load >= CPUMonitor.warningLoad * 0.7 ? .yellow : Color(white: 0.6)
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "cpu").font(.caption2)
+            Text("\(Int((monitor.load * 100).rounded()))%")
+                .font(.caption.monospacedDigit())
+                // Fixed width so the bar does not shuffle as the number changes.
+                .frame(minWidth: 34, alignment: .trailing)
+        }
+        .foregroundStyle(tint)
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Processor load")
+        .accessibilityValue("\(Int((monitor.load * 100).rounded())) percent")
+        .onAppear { monitor.start() }
+        .onDisappear { monitor.stop() }
     }
 }
 

@@ -9,16 +9,22 @@ import SwiftUI
 /// it one of its own.
 struct MixerPanel: View {
     @ObservedObject var player: HarpPlayer
+    /// DONE closes the mixer and brings the pads back, as tapping MIX again does.
+    let onDone: () -> Void
     private var store: InstrumentStore { player.store }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 12) {
-                MasterStrip(store: store, levels: store.levels)
-                ForEach(HarpPart.allCases, id: \.self) { part in
-                    PartStrip(player: player, store: store, part: part)
+        HStack(alignment: .top, spacing: 12) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    MasterStrip(store: store, levels: store.levels)
+                    ForEach(HarpPart.allCases, id: \.self) { part in
+                        PartStrip(player: player, store: store, part: part)
+                    }
                 }
             }
+            StudioTapButton(title: "DONE", action: onDone)
+                .accessibilityLabel("Close the mixer")
         }
     }
 }
