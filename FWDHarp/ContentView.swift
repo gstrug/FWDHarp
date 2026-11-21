@@ -53,10 +53,9 @@ struct ContentView: View {
     }
 
     private var topBar: some View {
-        // Two parts, lined up with the screen below: the left over the pads, and the
-        // plate's own instrument, EDIT and FX directly over the plate (Graham,
-        // 2026-11-21). Same padding and gap as the pads and plate, so they align.
-        HStack(spacing: 24) {
+        // The app's controls on the left; the plate's on the right, over the plate.
+        // Same side padding as the pads and plate below, so the edges line up.
+        HStack(spacing: 12) {
             HStack(spacing: 12) {
                 Button { showCredits = true } label: {
                     Image(systemName: "info.circle")
@@ -67,9 +66,6 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("FWD Harp: About and Credits")
                 keyMenu
-                RangeChips(player: player)
-                ScaleMenu(player: player)
-                Spacer(minLength: 8)
                 StudioToggleChip(title: "MIX", isOn: $showMixer, tint: StudioStyle.displayText,
                                  accessibilityLabel: "Mixer, in place of the pads")
                 // Lit while MIDI out is on; opens its settings.
@@ -82,12 +78,15 @@ struct ContentView: View {
                 StudioTapButton(title: "PANIC") { player.panic() }
                     .accessibilityLabel("MIDI panic: stop every sounding note")
             }
-            .frame(maxWidth: .infinity)
+            Spacer(minLength: 8)
+            // Everything that belongs to the plate, on the right over it: its range and
+            // scale, then its instrument, EDIT and FX (Graham, 2026-11-21).
             HStack(spacing: 10) {
+                RangeChips(player: player)
+                ScaleMenu(player: player)
                 PartInstrumentButtons(store: store, part: .plate)
                 EffectsToggleButton(store: store, part: .plate)
             }
-            .frame(width: 300, alignment: .trailing)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
