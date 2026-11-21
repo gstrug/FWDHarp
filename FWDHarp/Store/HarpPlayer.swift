@@ -10,7 +10,7 @@ import Combine
 ///   clean changes (the brief's rule with auto-strum off).
 /// The modifiers (7th, sus2, sus4) stop nothing, so they can colour a ringing chord.
 /// Lifting every pad leaves the notes ringing too; the plate is then silent until a pad
-/// is pressed. This is the simplest version, to be adjusted once Graham has played it.
+/// is pressed, unless Hold is on, which keeps the last chord chosen. This is the simplest version, to be adjusted once Graham has played it.
 final class HarpPlayer: ObservableObject {
     let store: InstrumentStore
 
@@ -34,13 +34,16 @@ final class HarpPlayer: ObservableObject {
 
     var key: MajorKey { store.setup.key }
     var chord: Chord? { selection.chord(in: key) }
-    var stringCount: Int { StrumPlate.stringCount(octaves: StrumPlate.defaultOctaves) }
+    var stringCount: Int { StrumPlate.stringCount(octaves: store.setup.plateOctaves) }
+    var octaveShift: Int { store.setup.octaveShift }
+    var plateOctaves: Int { store.setup.plateOctaves }
 
     /// The note on each string for the chord held now, bottom string first; empty with
     /// no chord held.
     var plateNotes: [Int] {
         guard let chord else { return [] }
-        return StrumPlate.notes(for: chord, strings: stringCount, from: StrumPlate.lowestNote(in: key))
+        return StrumPlate.notes(for: chord, strings: stringCount,
+                                from: StrumPlate.lowestNote(in: key, octaveShift: octaveShift))
     }
 
     /// The pad's chord in the current key, with the modifiers held now.
@@ -61,6 +64,20 @@ final class HarpPlayer: ObservableObject {
         selection.release(pad)
         // Lifting one of two held pads hands over to the other: that is a change too.
         if let now = selection.current, now != before { stopRinging() }
+    }
+
+    /// Hold: the last chord stays chosen after the left hand lifts. Not saved; the app
+    /// always opens with it off.
+    func setHolding(_ on: Bool) {
+        selection.setHolding(on)
+    }
+
+    func setPlateOctaves(_ octaves: Int) {
+        store.setPlateOctaves(octaves)
+    }
+
+    func shiftOctave(by step: Int) {
+        store.setOctaveShift(octaveShift + step)
     }
 
     func setKey(_ key: MajorKey) {

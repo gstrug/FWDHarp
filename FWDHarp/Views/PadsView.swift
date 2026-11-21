@@ -98,7 +98,8 @@ private struct PadFace: View {
         let corner = size.width * 0.16
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: corner)
-                .fill(isHeld
+                // Lit while a finger is on it, or while Hold keeps its chord (sounding).
+                .fill(isHeld || isSounding
                       ? AnyShapeStyle(lit.opacity(isSounding || pad.isModifier ? 1 : 0.55))
                       : AnyShapeStyle(LinearGradient(colors: [StudioStyle.capTop, StudioStyle.capBottom],
                                                      startPoint: .top, endPoint: .bottom)))
@@ -108,14 +109,14 @@ private struct PadFace: View {
 
             Text(pad.degreeLabel)
                 .font(.system(size: max(10, size.width * 0.13), weight: .semibold))
-                .foregroundStyle(isHeld ? Color.black.opacity(0.6) : StudioStyle.scaleText)
+                .foregroundStyle(isHeld || isSounding ? Color.black.opacity(0.6) : StudioStyle.scaleText)
                 .padding(size.width * 0.09)
 
             Text(pad.modifierTitle ?? chordName ?? "")
                 .font(.system(size: size.width * (pad.isModifier ? 0.27 : 0.26), weight: .bold))
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
-                .foregroundStyle(isHeld ? Color.black.opacity(0.85) : Color(white: 0.9))
+                .foregroundStyle(isHeld || isSounding ? Color.black.opacity(0.85) : Color(white: 0.9))
                 .frame(width: size.width, height: size.height)
         }
         .scaleEffect(isHeld ? 0.97 : 1)

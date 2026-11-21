@@ -30,7 +30,7 @@ nonisolated struct PluginSlot: Codable, Identifiable, Equatable {
 }
 
 /// Everything FWD Harp remembers between launches: the instrument and its sound, the
-/// effects after it, and the key. Saved automatically (see SetupStorage).
+/// effects after it, the key, and the plate's range and octave. Saved automatically (see SetupStorage).
 ///
 /// Every field is optional or defaulted and the decoder is tolerant, so a file from a
 /// later or earlier version still opens: settings it does not know are simply left at
@@ -56,6 +56,11 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var keyTonic: Int = 0
 
     var key: MajorKey { MajorKey(tonic: keyTonic) }
+    /// How many octaves the strum plate covers (StrumPlate.octaveRange); more octaves
+    /// means more strings in the same height.
+    var plateOctaves: Int = StrumPlate.minimumOctaves
+    /// The plate moved up or down by whole octaves (StrumPlate.octaveShiftRange).
+    var octaveShift: Int = 0
 
     init() {}
 
@@ -76,12 +81,15 @@ nonisolated struct HarpSetup: Codable, Equatable {
         // A patch with no instrument to belong to means nothing.
         if copy.instrument == nil { copy.instrumentState = nil }
         if !(0..<12).contains(copy.keyTonic) { copy.keyTonic = 0 }
+        if !StrumPlate.octaveRange.contains(copy.plateOctaves) { copy.plateOctaves = StrumPlate.minimumOctaves }
+        if !StrumPlate.octaveShiftRange.contains(copy.octaveShift) { copy.octaveShift = 0 }
         copy.formatVersion = Self.currentFormatVersion
         return copy
     }
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic
+        case plateOctaves, octaveShift
     }
 
     init(from decoder: Decoder) throws {
@@ -93,5 +101,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
         effects = try c.decodeIfPresent([PluginSlot].self, forKey: .effects) ?? []
         effectsBypassed = try c.decodeIfPresent(Bool.self, forKey: .effectsBypassed) ?? false
         keyTonic = try c.decodeIfPresent(Int.self, forKey: .keyTonic) ?? 0
+        plateOctaves = try c.decodeIfPresent(Int.self, forKey: .plateOctaves) ?? StrumPlate.minimumOctaves
+        octaveShift = try c.decodeIfPresent(Int.self, forKey: .octaveShift) ?? 0
     }
 }

@@ -10,8 +10,14 @@ import Foundation
 /// in order, low to high); the other plate patterns wait for Graham's first playing
 /// test.
 nonisolated enum StrumPlate {
-    /// The brief's starting range: 3 octaves of a three-note chord, root to root.
-    static let defaultOctaves = 3
+    /// The brief's starting range, 3 octaves of a three-note chord root to root (10
+    /// strings), is also the narrowest: Graham likes that spread. Wider ranges put more
+    /// strings in the same height.
+    static let minimumOctaves = 3
+    static let maximumOctaves = 5
+    static let octaveRange = minimumOctaves...maximumOctaves
+    /// How far the octave buttons move the plate, in octaves.
+    static let octaveShiftRange = -2...2
     /// Softest and loudest, left edge to right edge.
     static let softestVelocity = 30
     static let loudestVelocity = 127
@@ -21,9 +27,10 @@ nonisolated enum StrumPlate {
     }
 
     /// The bottom string starts at the key's own note in the octave below middle C
-    /// (C3 to B3), so the plate sits in the same place in every key.
-    static func lowestNote(in key: MajorKey) -> Int {
-        48 + key.tonic
+    /// (C3 to B3), so the plate sits in the same place in every key; the octave buttons
+    /// move it by whole octaves.
+    static func lowestNote(in key: MajorKey, octaveShift: Int = 0) -> Int {
+        48 + key.tonic + 12 * octaveShift
     }
 
     /// The note on each string, bottom string first: the chord's notes in order,

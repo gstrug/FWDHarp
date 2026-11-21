@@ -20,9 +20,12 @@ struct ContentView: View {
             HStack(spacing: 24) {
                 PadsView(player: player)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                StrumPlateView(player: player)
-                    .frame(width: 300)
-                    .frame(maxHeight: .infinity)
+                VStack(spacing: 10) {
+                    PlateControls(player: player)
+                    StrumPlateView(player: player)
+                        .frame(maxHeight: .infinity)
+                }
+                .frame(width: 300)
             }
             .padding(20)
         }
@@ -97,6 +100,11 @@ struct ContentView: View {
             Text("FWD Harp")
                 .font(.headline)
                 .foregroundStyle(Color(white: 0.87))
+            StudioToggleChip(title: "HOLD",
+                             isOn: Binding(get: { player.selection.isHolding },
+                                           set: { player.setHolding($0) }),
+                             tint: .orange,
+                             accessibilityLabel: "Hold: keep the last chord after lifting your hand")
             Spacer()
             keyMenu
             Button { showPicker = true } label: {
@@ -159,6 +167,55 @@ struct ContentView: View {
             .studioWindow()
         }
         .accessibilityLabel("Key: \(player.key.name) major")
+    }
+}
+
+/// Above the plate: its range (more octaves, more strings in the same height) and
+/// the octave buttons that move it up or down.
+private struct PlateControls: View {
+    @ObservedObject var player: HarpPlayer
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("RANGE")
+                .font(.system(size: 11, weight: .bold)).tracking(0.8)
+                .foregroundStyle(StudioStyle.scaleText)
+            ForEach(Array(StrumPlate.octaveRange), id: \.self) { octaves in
+                StudioChipLabel(title: "\(octaves)", tint: StudioStyle.displayText,
+                                look: player.plateOctaves == octaves ? .on : .off)
+                    .onTapGesture { player.setPlateOctaves(octaves) }
+                    .accessibilityElement()
+                    .accessibilityAddTraits(player.plateOctaves == octaves ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityLabel("\(octaves) octaves")
+            }
+            Spacer(minLength: 4)
+            Text("OCT")
+                .font(.system(size: 11, weight: .bold)).tracking(0.8)
+                .foregroundStyle(StudioStyle.scaleText)
+            octaveButton("chevron.down", step: -1, label: "Octave down",
+                         enabled: player.octaveShift > StrumPlate.octaveShiftRange.lowerBound)
+            Text(player.octaveShift > 0 ? "+\(player.octaveShift)" : "\(player.octaveShift)")
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .foregroundStyle(StudioStyle.displayText)
+                .frame(minWidth: 22)
+                .accessibilityLabel("Octave \(player.octaveShift)")
+            octaveButton("chevron.up", step: 1, label: "Octave up",
+                         enabled: player.octaveShift < StrumPlate.octaveShiftRange.upperBound)
+        }
+    }
+
+    private func octaveButton(_ symbol: String, step: Int, label: String, enabled: Bool) -> some View {
+        Button { player.shiftOctave(by: step) } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(enabled ? Color(white: 0.87) : Color(white: 0.35))
+                .frame(width: 34, height: 30)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color(white: 0.22)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 }
 

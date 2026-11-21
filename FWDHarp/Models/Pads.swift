@@ -108,6 +108,9 @@ nonisolated struct PadLayout: Equatable {
 /// The modifiers are counted separately, so they work with any pad: the 7th adds the
 /// 7th, sus2 or sus4 replaces the 3rd, and the 7th with a sus gives 7sus. With both
 /// sus pads held, the last pressed counts.
+///
+/// With Hold on, the last chord pad pressed stays chosen after it is lifted, until
+/// another is pressed; the modifiers still work live on it.
 nonisolated struct PadSelection: Equatable {
     /// Chord pads held, in the order they were pressed.
     private(set) var held: [ChordPad] = []
@@ -115,7 +118,17 @@ nonisolated struct PadSelection: Equatable {
     /// sus2 and sus4 held, in the order pressed.
     private(set) var suspensionsHeld: [ChordPad] = []
 
-    var current: ChordPad? { held.last }
+    private(set) var isHolding = false
+    /// The last chord pad pressed, kept while Hold is on.
+    private(set) var latched: ChordPad?
+
+    var current: ChordPad? { held.last ?? (isHolding ? latched : nil) }
+
+    mutating func setHolding(_ on: Bool) {
+        isHolding = on
+        // Off: the kept chord goes, so the plate plays only what is held.
+        if !on { latched = nil }
+    }
 
     var suspension: Suspension? {
         switch suspensionsHeld.last {
@@ -142,6 +155,7 @@ nonisolated struct PadSelection: Equatable {
         default:
             held.removeAll { $0 == pad }
             held.append(pad)
+            latched = pad
         }
     }
 
@@ -157,6 +171,7 @@ nonisolated struct PadSelection: Equatable {
         held.removeAll()
         seventhHeld = false
         suspensionsHeld.removeAll()
+        latched = nil
     }
 
     /// The chord a pad plays in `key` with the modifiers held now; nil for a modifier.

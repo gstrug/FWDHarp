@@ -93,6 +93,29 @@ final class PadTests: XCTestCase {
         XCTAssertEqual(selection.chord(in: f)?.name(preferFlats: f.prefersFlats), "B♭7")
     }
 
+    func testHoldKeepsTheLastChordAfterLifting() {
+        var selection = PadSelection()
+        selection.setHolding(true)
+        selection.press(.five)
+        selection.release(.five)
+        XCTAssertEqual(selection.current, .five, "kept after lifting")
+        selection.press(.seven)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "G7", "modifiers still work on it")
+        selection.release(.seven)
+        selection.press(.two)
+        selection.release(.two)
+        XCTAssertEqual(selection.current, .two, "a new pad replaces it")
+        selection.setHolding(false)
+        XCTAssertNil(selection.current, "Hold off: the kept chord goes")
+    }
+
+    func testWithoutHoldLiftingLeavesNoChord() {
+        var selection = PadSelection()
+        selection.press(.one)
+        selection.release(.one)
+        XCTAssertNil(selection.current)
+    }
+
     func testPadsDoNotOverlapAndATouchFindsItsPad() {
         let layout = PadLayout(size: CGSize(width: 700, height: 500))
         let frames = ChordPad.allCases.map(layout.frame(of:))
@@ -165,6 +188,33 @@ final class StrumPlateTests: XCTestCase {
         XCTAssertEqual(StrumPlate.strings(crossedFrom: 2, to: 5), [3, 4, 5])
         XCTAssertEqual(StrumPlate.strings(crossedFrom: 5, to: 2), [4, 3, 2], "downward, in order")
         XCTAssertEqual(StrumPlate.strings(crossedFrom: 3, to: 3), [])
+    }
+
+    func testWiderRangesAddStrings() {
+        XCTAssertEqual(StrumPlate.octaveRange.map(StrumPlate.stringCount(octaves:)), [10, 13, 16])
+    }
+
+    func testTheOctaveButtonsMoveThePlate() {
+        let c = MajorKey(tonic: 0)
+        XCTAssertEqual(StrumPlate.lowestNote(in: c, octaveShift: -1), 36, "C2")
+        XCTAssertEqual(StrumPlate.lowestNote(in: c, octaveShift: 2), 72, "C5")
+        let high = StrumPlate.notes(for: c.chord(degree: 1), strings: 16,
+                                    from: StrumPlate.lowestNote(in: MajorKey(tonic: 11), octaveShift: 2))
+        XCTAssertTrue(high.allSatisfy { $0 <= 127 }, "never past the top of MIDI")
+    }
+
+    func testRangeAndOctaveAreSavedAndKeptInBounds() throws {
+        var setup = HarpSetup()
+        setup.plateOctaves = 5
+        setup.octaveShift = -1
+        let back = try SetupStorage.decode(JSONEncoder().encode(setup))
+        XCTAssertEqual(back.plateOctaves, 5)
+        XCTAssertEqual(back.octaveShift, -1)
+        let bad = try SetupStorage.decode(Data(#"{"plateOctaves": 9, "octaveShift": 7}"#.utf8))
+        XCTAssertEqual(bad.plateOctaves, 3)
+        XCTAssertEqual(bad.octaveShift, 0)
+        let old = try SetupStorage.decode(Data("{}".utf8))
+        XCTAssertEqual(old.plateOctaves, 3, "a file from before keeps today's spread")
     }
 
     func testTheKeyIsSaved() throws {

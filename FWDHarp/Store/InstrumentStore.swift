@@ -109,6 +109,15 @@ final class InstrumentStore: ObservableObject {
         setup.keyTonic = key.tonic
     }
 
+    func setPlateOctaves(_ octaves: Int) {
+        setup.plateOctaves = min(max(octaves, StrumPlate.minimumOctaves), StrumPlate.maximumOctaves)
+    }
+
+    func setOctaveShift(_ shift: Int) {
+        setup.octaveShift = min(max(shift, StrumPlate.octaveShiftRange.lowerBound),
+                                StrumPlate.octaveShiftRange.upperBound)
+    }
+
     /// The instrument's editor closed: keep its sound.
     func captureInstrumentState() {
         guard !isLoading, plugin != nil else { return }
