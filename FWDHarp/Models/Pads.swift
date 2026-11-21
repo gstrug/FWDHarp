@@ -112,8 +112,9 @@ nonisolated struct PadLayout: Equatable {
 /// With Hold on, the last chord pad pressed stays chosen after it is lifted, until
 /// another is pressed, and so do the modifiers it was played with (Graham,
 /// 2026-11-21): a modifier pressed on the kept chord stays on it after the thumb
-/// lifts. Pressing a chord pad takes the modifiers held at that moment, so pressing
-/// C again with the thumb off goes back to plain C.
+/// lifts, and a second tap on it takes it off again. Pressing a chord pad takes the
+/// modifiers held at that moment, so pressing C again with the thumb off goes back
+/// to plain C.
 nonisolated struct PadSelection: Equatable {
     /// Chord pads held, in the order they were pressed.
     private(set) var held: [ChordPad] = []
@@ -131,10 +132,12 @@ nonisolated struct PadSelection: Equatable {
 
     /// The 7th and sus in force for the chord sounding now: those held, and with Hold
     /// on, those kept with the chord.
-    var seventhInForce: Bool { seventhHeld || (isHolding && latched != nil && latchedSeventh) }
-    var suspensionInForce: Suspension? {
-        suspension ?? (isHolding && latched != nil ? latchedSuspension : nil)
-    }
+    var seventhInForce: Bool { keepsModifiers ? latchedSeventh : seventhHeld }
+    var suspensionInForce: Suspension? { keepsModifiers ? latchedSuspension : suspension }
+
+    /// Hold is on with a chord kept: the modifiers are then the kept ones, which a tap
+    /// switches on and off.
+    private var keepsModifiers: Bool { isHolding && latched != nil }
 
     mutating func setHolding(_ on: Bool) {
         isHolding = on
@@ -174,11 +177,14 @@ nonisolated struct PadSelection: Equatable {
         switch pad {
         case .seven:
             seventhHeld = true
-            latchedSeventh = true
+            if keepsModifiers { latchedSeventh.toggle() }
         case .sus2, .sus4:
             suspensionsHeld.removeAll { $0 == pad }
             suspensionsHeld.append(pad)
-            latchedSuspension = suspension
+            if keepsModifiers {
+                let tapped: Suspension = pad == .sus2 ? .second : .fourth
+                latchedSuspension = latchedSuspension == tapped ? nil : tapped
+            }
         default:
             held.removeAll { $0 == pad }
             held.append(pad)

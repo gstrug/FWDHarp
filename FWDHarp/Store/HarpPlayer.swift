@@ -43,15 +43,23 @@ final class HarpPlayer: ObservableObject {
 
     var key: MajorKey { store.setup.key }
     var chord: Chord? { selection.chord(in: key) }
-    var stringCount: Int { StrumPlate.stringCount(octaves: store.setup.plateOctaves) }
+    var plateScale: PlateScale { store.setup.plateScale }
+    /// Strings on the plate: fixed for chords, every note of a scale across the range.
+    var stringCount: Int { StrumPlate.stringCount(octaves: store.setup.plateOctaves, scale: plateScale) }
+    /// The chord's strings, which auto-strum builds on whatever the plate shows.
+    private var chordStringCount: Int { StrumPlate.stringCount(octaves: store.setup.plateOctaves) }
     var octaveShift: Int { store.setup.octaveShift }
     var plateOctaves: Int { store.setup.plateOctaves }
 
     var platePattern: PlatePattern { store.setup.platePattern }
 
-    /// The note on each string for the chord held now, bottom string first, in the
-    /// plate pattern's order; empty with no chord held.
+    /// The note on each string, bottom string first, in the plate pattern's order: the
+    /// scale chosen, or the chord held now (empty with none held).
     var plateNotes: [Int] {
+        if plateScale != .chord {
+            return StrumPlate.notes(for: plateScale, in: key, octaves: plateOctaves,
+                                    octaveShift: octaveShift, pattern: platePattern)
+        }
         guard let chord else { return [] }
         return StrumPlate.notes(for: chord, strings: stringCount,
                                 from: StrumPlate.lowestNote(in: key, octaveShift: octaveShift),
@@ -61,12 +69,19 @@ final class HarpPlayer: ObservableObject {
     /// The plate's notes in straight order, which auto-strum's figures are built from.
     private var straightNotes: [Int] {
         guard let chord else { return [] }
-        return StrumPlate.notes(for: chord, strings: stringCount,
+        return StrumPlate.notes(for: chord, strings: chordStringCount,
                                 from: StrumPlate.lowestNote(in: key, octaveShift: octaveShift))
     }
 
     func setPlatePattern(_ pattern: PlatePattern) {
         store.setPlatePattern(pattern)
+    }
+
+    func setPlateScale(_ scale: PlateScale) {
+        guard scale != plateScale else { return }
+        stopRinging()
+        touchedStrings = []
+        store.setPlateScale(scale)
     }
 
     /// The pad's chord in the current key, with the modifiers held now.
@@ -82,6 +97,9 @@ final class HarpPlayer: ObservableObject {
         let changed = selection.current != before && selection.current != nil
         if changed { stopRinging() }
         syncAutoStrum(newPad: changed)
+        // The same chord pad pressed again (Hold kept it sounding): auto-strum starts
+        // its pattern again, so a single sweep can be swept again (Graham, 2026-11-21).
+        if !pad.isModifier, !changed, selection.current == pad { strummer.retrigger() }
     }
 
     func release(_ pad: ChordPad) {

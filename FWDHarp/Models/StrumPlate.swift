@@ -35,7 +35,11 @@ nonisolated enum StrumPlate {
     /// The note on each string, bottom string first: the chord's notes in order,
     /// starting from the first one at or above `lowest`.
     static func notes(for chord: Chord, strings: Int, from lowest: Int) -> [Int] {
-        let classes = Set(chord.pitchClasses)
+        notes(pitchClasses: Set(chord.pitchClasses), strings: strings, from: lowest)
+    }
+
+    /// The notes of a set of pitch classes in order up from `lowest`, one per string.
+    static func notes(pitchClasses classes: Set<Int>, strings: Int, from lowest: Int) -> [Int] {
         guard !classes.isEmpty, strings > 0 else { return [] }
         var result: [Int] = []
         var note = lowest
@@ -50,10 +54,36 @@ nonisolated enum StrumPlate {
     /// of the chord's notes from `lowest`; strings that would go past the top of MIDI
     /// are left off.
     static func notes(for chord: Chord, strings: Int, from lowest: Int, pattern: PlatePattern) -> [Int] {
-        guard strings > 0 else { return [] }
         // Enough of the straight run for every pattern to look ahead into.
         let tones = notes(for: chord, strings: strings * 2 + 4, from: lowest)
-        guard !tones.isEmpty else { return [] }
+        return ordered(tones, strings: strings, pattern: pattern, bass: bass(of: chord, below: tones))
+    }
+
+    /// A scale on the plate (PlateScale): its notes up from the scale's root, as many
+    /// strings as the range's octaves hold, in the plate pattern's order. Bass + Chord
+    /// has no chord to take a bass from here, so it plays Straight.
+    static func notes(for scale: PlateScale, in key: MajorKey, octaves: Int, octaveShift: Int,
+                      pattern: PlatePattern) -> [Int] {
+        guard let classes = scale.pitchClasses(in: key) else { return [] }
+        let strings = stringCount(octaves: octaves, scale: scale)
+        let lowest = 48 + scale.root(in: key) + 12 * octaveShift
+        let tones = notes(pitchClasses: classes, strings: strings * 2 + 4, from: lowest)
+        return ordered(tones, strings: strings, pattern: pattern == .bassAndChord ? .straight : pattern,
+                       bass: nil)
+    }
+
+    /// Strings on the plate: for a chord, 3 an octave plus the top root (the spread
+    /// Graham likes); for a scale, every note of it across the same octaves, so a scale
+    /// is never missing notes.
+    static func stringCount(octaves: Int, scale: PlateScale) -> Int {
+        guard let perOctave = scale.notesPerOctave else { return stringCount(octaves: octaves) }
+        return max(1, octaves) * perOctave + 1
+    }
+
+    /// The straight run `tones` put in a plate pattern's order, one note per string.
+    private static func ordered(_ tones: [Int], strings: Int, pattern: PlatePattern,
+                                bass: (root: Int, fifth: Int)?) -> [Int] {
+        guard strings > 0, !tones.isEmpty else { return [] }
         func tone(_ index: Int) -> Int? { tones.indices.contains(index) ? tones[index] : nil }
         var result: [Int?]
         switch pattern {
@@ -72,7 +102,7 @@ nonisolated enum StrumPlate {
             // The bottom strings rock between the root and 5th below the chord, the rest
             // run straight up above them.
             let bassStrings = max(2, Int(Double(strings) * 0.4))
-            guard let bass = bass(of: chord, below: tones) else {
+            guard let bass else {
                 result = (0..<strings).map { tone($0) }
                 break
             }
@@ -130,5 +160,49 @@ nonisolated enum PlatePattern: String, CaseIterable, Codable {
         case .octaves: return "Octaves"
         case .bassAndChord: return "Bass + Chord"
         }
+    }
+}
+
+/// What the plate plays: the held chord's notes (the default), or a scale in the key,
+/// which limits the plate to that scale's notes so a melody or solo cannot hit a wrong
+/// note (design brief, "Scales"). A scale plays whether or not a pad is held.
+nonisolated enum PlateScale: String, CaseIterable, Codable {
+    case chord, major, pentatonic, blues, naturalMinor, chromatic
+
+    var title: String {
+        switch self {
+        case .chord: return "Chord"
+        case .major: return "Major"
+        case .pentatonic: return "Pentatonic"
+        case .blues: return "Blues"
+        case .naturalMinor: return "Natural Minor"
+        case .chromatic: return "Chromatic"
+        }
+    }
+
+    /// Semitones above the scale's root; nil for Chord.
+    var intervals: [Int]? {
+        switch self {
+        case .chord: return nil
+        case .major: return [0, 2, 4, 5, 7, 9, 11]
+        case .pentatonic: return [0, 2, 4, 7, 9]                // major pentatonic
+        case .blues: return [0, 3, 5, 6, 7, 10]                 // C E♭ F F♯ G B♭ in C
+        case .naturalMinor: return [0, 2, 3, 5, 7, 8, 10]
+        case .chromatic: return Array(0..<12)
+        }
+    }
+
+    var notesPerOctave: Int? { intervals?.count }
+
+    /// The scale's own note: the key's note, except Natural Minor, which is the key's
+    /// relative minor (A minor in C), so it shares the key's notes.
+    func root(in key: MajorKey) -> Int {
+        self == .naturalMinor ? (key.tonic + 9) % 12 : key.tonic
+    }
+
+    func pitchClasses(in key: MajorKey) -> Set<Int>? {
+        guard let intervals else { return nil }
+        let root = root(in: key)
+        return Set(intervals.map { (root + $0) % 12 })
     }
 }

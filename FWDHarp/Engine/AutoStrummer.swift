@@ -54,6 +54,15 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
         }
     }
 
+    /// The chord pad sounding was pressed again (with Hold, it never stopped): play
+    /// the pattern again from its start, or sweep again.
+    func retrigger() {
+        locked {
+            guard enabled, chord != nil else { return }
+            if pattern == .singleSweep { sweepLocked() } else { stopLocked(); startLocked() }
+        }
+    }
+
     func setEnabled(_ on: Bool) {
         locked {
             enabled = on

@@ -190,3 +190,95 @@ final class PatternOptionTests: XCTestCase {
         XCTAssertNil(selection.current)
     }
 }
+
+/// Scales on the plate, and tapping a kept modifier off.
+final class ScaleTests: XCTestCase {
+    private let c = MajorKey(tonic: 0)
+
+    private func names(_ notes: [Int]) -> [String] {
+        notes.map { NoteNames.name($0 % 12, preferFlats: true) }
+    }
+
+    func testAScaleFillsEveryNoteAcrossTheRange() {
+        XCTAssertEqual(StrumPlate.stringCount(octaves: 3, scale: .chord), 10, "chords keep their spread")
+        XCTAssertEqual(StrumPlate.stringCount(octaves: 3, scale: .major), 22)
+        XCTAssertEqual(StrumPlate.stringCount(octaves: 3, scale: .pentatonic), 16)
+        XCTAssertEqual(StrumPlate.stringCount(octaves: 3, scale: .chromatic), 37)
+        let major = StrumPlate.notes(for: .major, in: c, octaves: 3, octaveShift: 0, pattern: .straight)
+        XCTAssertEqual(major.count, 22)
+        XCTAssertEqual(major.first, 48)
+        XCTAssertEqual(major.last, 84, "C3 to C6")
+    }
+
+    func testTheScales() {
+        func first(_ scale: PlateScale, _ count: Int) -> [String] {
+            names(Array(StrumPlate.notes(for: scale, in: c, octaves: 3, octaveShift: 0,
+                                         pattern: .straight).prefix(count)))
+        }
+        XCTAssertEqual(first(.major, 8), ["C", "D", "E", "F", "G", "A", "B", "C"])
+        XCTAssertEqual(first(.pentatonic, 6), ["C", "D", "E", "G", "A", "C"])
+        XCTAssertEqual(first(.blues, 7), ["C", "E♭", "F", "G♭", "G", "B♭", "C"])
+        XCTAssertEqual(first(.naturalMinor, 8), ["A", "B", "C", "D", "E", "F", "G", "A"],
+                       "the relative minor, starting on A")
+        XCTAssertEqual(first(.chromatic, 3), ["C", "D♭", "D"])
+    }
+
+    func testScalesFollowTheKeyAndOctave() {
+        let g = StrumPlate.notes(for: .pentatonic, in: MajorKey(tonic: 7), octaves: 3, octaveShift: -1,
+                                 pattern: .straight)
+        XCTAssertEqual(g.first, 43, "G2")
+        XCTAssertEqual(names(Array(g.prefix(5))), ["G", "A", "B", "D", "E"])
+    }
+
+    func testPlateOrdersWorkOnScales() {
+        let alternating = StrumPlate.notes(for: .major, in: c, octaves: 3, octaveShift: 0, pattern: .alternating)
+        XCTAssertEqual(Array(alternating.prefix(4)), [48, 52, 50, 53], "C E D F: in thirds")
+        let bass = StrumPlate.notes(for: .major, in: c, octaves: 3, octaveShift: 0, pattern: .bassAndChord)
+        XCTAssertEqual(bass, StrumPlate.notes(for: .major, in: c, octaves: 3, octaveShift: 0, pattern: .straight),
+                       "no chord to take a bass from, so straight")
+    }
+
+    func testChordMeansNoScale() {
+        XCTAssertEqual(StrumPlate.notes(for: .chord, in: c, octaves: 3, octaveShift: 0, pattern: .straight), [])
+    }
+
+    func testTheScaleIsSaved() throws {
+        var setup = HarpSetup()
+        setup.plateScale = .blues
+        XCTAssertEqual(try SetupStorage.decode(JSONEncoder().encode(setup)).plateScale, .blues)
+        XCTAssertEqual(try SetupStorage.decode(Data("{}".utf8)).plateScale, .chord)
+    }
+
+    func testASecondTapTakesAKeptModifierOff() {
+        var selection = PadSelection()
+        selection.setHolding(true)
+        selection.press(.one)
+        selection.release(.one)
+        selection.press(.seven)
+        selection.release(.seven)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "C7")
+        selection.press(.seven)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "C", "off at once, finger still down")
+        selection.release(.seven)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "C")
+        selection.press(.sus2)
+        selection.release(.sus2)
+        selection.press(.sus4)
+        selection.release(.sus4)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "Csus4", "the other sus swaps in")
+        selection.press(.sus4)
+        selection.release(.sus4)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "C")
+    }
+
+    func testWithoutHoldModifiersAreOnlyWhileHeld() {
+        var selection = PadSelection()
+        selection.press(.one)
+        selection.press(.seven)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "C7")
+        selection.release(.seven)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "C")
+        selection.press(.seven)
+        XCTAssertEqual(selection.chord(in: c)?.name(preferFlats: false), "C7", "a second press is still on")
+    }
+}

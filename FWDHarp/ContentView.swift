@@ -110,6 +110,7 @@ struct ContentView: View {
                              tint: .orange,
                              accessibilityLabel: "Hold: keep the last chord after lifting your hand")
             RangeChips(player: player)
+            ScaleMenu(player: player)
             Spacer()
             keyMenu
             Button { showPicker = true } label: {
@@ -193,6 +194,42 @@ private struct RangeChips: View {
                     .accessibilityLabel("Range \(octaves) octaves")
             }
         }
+    }
+}
+
+/// What the plate plays, after RANGE: the chord held, or a scale in the key.
+private struct ScaleMenu: View {
+    @ObservedObject var player: HarpPlayer
+
+    var body: some View {
+        Menu {
+            ForEach(PlateScale.allCases, id: \.self) { scale in
+                Button {
+                    player.setPlateScale(scale)
+                } label: {
+                    if scale == player.plateScale {
+                        Label(scale.title, systemImage: "checkmark")
+                    } else {
+                        Text(scale.title)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text("SCALE")
+                    .font(.system(size: 11, weight: .bold)).tracking(0.8)
+                    .foregroundStyle(StudioStyle.scaleText)
+                Text(player.plateScale.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(StudioStyle.displayText)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(StudioStyle.scaleText)
+            }
+            .studioWindow()
+        }
+        .accessibilityLabel("Plate scale: \(player.plateScale.title)")
     }
 }
 
