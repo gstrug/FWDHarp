@@ -20,7 +20,7 @@ struct ContentView: View {
                 // can be played while its level is set.
                 VStack(alignment: .leading, spacing: 10) {
                     AutoStrumBar(player: player)
-                    RhythmBar(player: player)
+                    RhythmControls(player: player)
                     if showMixer {
                         MixerPanel(player: player, onDone: { showMixer = false })
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -322,7 +322,7 @@ private struct AutoStrumBar: View {
 /// clock as auto-strum. START plays at once (with the style's intro first if INTRO is
 /// lit); SYNC instead waits for the first pad (auto-strum on) or the first strum (off).
 /// A/B and a new style change at the next bar; FILL fills to the end of the bar.
-private struct RhythmBar: View {
+private struct RhythmControls: View {
     @ObservedObject var player: HarpPlayer
 
     private var running: Bool { player.rhythm.running }
