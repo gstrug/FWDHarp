@@ -215,4 +215,10 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   stack note-ons and hang). Mixer is now `MixerPanel`, shown in place of the pads while
   MIX is lit (plate stays playable); master strip first, all strips one size
   (StripSize) so drums/bass strips can join.
+- 2026-11-21: "stuck notes" on the plate were the ring-until-chord-change design on
+  sustaining synths (and their release tails after PANIC). PlateRing (Short 0.4 s,
+  Medium 1.2 s, Long 3 s default, Until Chord) times each pluck's note-off; a restrike
+  re-times it (HarpPlayer.plucks). PANIC also sends CC64/120/123 on all 16 channels and
+  note-offs in both spellings. Master strip: Color.clear, not EmptyView (no size).
+  Velocity path checked in code (30–127 left→right); Graham to confirm on built-in.
 
