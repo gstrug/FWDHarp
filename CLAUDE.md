@@ -201,4 +201,13 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   Chromatic) in a SCALE menu after RANGE; plays without a pad; strings = every scale
   note across the range (Major 3 oct = 22); plate orders apply (Bass + Chord → Straight);
   auto-strum still plays the chord. Saved. Next: MIDI out.
+- 2026-11-21: two parts (HarpPart .plate/.auto), each PartSound (instrument, patch,
+  built-in, effects) + ChannelMix (volume, pan, mute); masterVolume. The plate's sound
+  stays in HarpSetup's old flat fields (old setups open unchanged); `autoSound` nil =
+  auto-strum plays through the plate's track (default; OWN SOUND gives it one, GM 24).
+  Track ids: plate …A1 (unchanged), auto …A2. AutoStrummer.setTarget follows. MIX
+  button → `Views/MixerView.swift` (strips: instrument/EDIT/FX via
+  `PartInstrumentButtons`, pan knob, fader + meter, M; master). Meters: LevelMonitor +
+  LevelBatcher copied from FWD. `.loadingOverlay(store)` / `.storeNotices(store)` on the
+  main screen AND the mixer sheet. Next: MIDI out (a channel per part).
 
