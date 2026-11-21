@@ -194,4 +194,11 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   each with a bass line that follows the chord pads, one FILL button (fill to the end of
   the bar). Built LAST. Meanwhile keep tempo one shared clock (MIDI clock/Link) and give
   MIDI out its own channel for chords/plate, so drums (ch 10) and bass can join later.
+- 2026-11-21: Hold + auto-strum: pressing the kept pad again retriggers the pattern
+  (AutoStrummer.retrigger; sweeps again). Hold: a second tap on a kept modifier takes
+  it off (PadSelection.keepsModifiers → latched toggles). Scales: PlateScale (Chord,
+  Major, Pentatonic = major pent., Blues = minor blues, Natural Minor = relative minor,
+  Chromatic) in a SCALE menu after RANGE; plays without a pad; strings = every scale
+  note across the range (Major 3 oct = 22); plate orders apply (Bass + Chord → Straight);
+  auto-strum still plays the chord. Saved. Next: MIDI out.
 
