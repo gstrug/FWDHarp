@@ -190,4 +190,8 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   latchedSuspension; pressing the pad again takes the modifiers held then); plate note
   orders (PlatePattern: Straight, Alternating, Rolling, Octaves, Bass + Chord) in a
   menu beside OCT, saved; auto-strum builds from the straight order.
+- 2026-11-21: added to the brief (not to build yet): a rhythm section — drum styles/genres
+  each with a bass line that follows the chord pads, one FILL button (fill to the end of
+  the bar). Built LAST. Meanwhile keep tempo one shared clock (MIDI clock/Link) and give
+  MIDI out its own channel for chords/plate, so drums (ch 10) and bass can join later.
 
