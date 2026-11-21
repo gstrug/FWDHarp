@@ -248,3 +248,12 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   (AutoStrum.colouredFigure: one passing note just below each next chord note); STRINGS
   (10/13/16/20/24, HarpSetup.plateStrings; old plateOctaves read as 3n+1) replaces RANGE.
 
+- 2026-11-21: rhythm section. `Models/Rhythm.swift` (9 styles: Rock/Pop, Country/Folk,
+  Ballad, Waltz 3/4, Bossa, Reggae, Blues Shuffle (triplet grid, swings), Disco, R&B; each
+  A/B, fill, intro, written one character per step; bass marks R 5 L O 3 6 7 over the
+  chord, root E1–D♯2). `Engine/Conductor.swift` replaces AutoStrummer: one clock, 12
+  ticks/beat, due-based; auto-strum locks to the rhythm's grid while it runs. FILL to bar
+  end (next bar if in its last quarter), crash after fill/intro; style/A-B change at the
+  bar. SYNC arms start on first pad (AUTO on) or first strum (off). Parts .drums (…A3,
+  GM kit, ch 10) and .bass (…A4, GM 33, ch 3) with mixer strips and MIDI rows. Style,
+  variation, intro saved. Rhythm row (`RhythmControls`) under the AUTO row.
