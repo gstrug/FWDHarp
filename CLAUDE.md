@@ -227,4 +227,8 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   (not the string's current note); HarpPlayer.held counts fingers per note. PANIC toned
   down (glitched at 300+ events): CC120 on ch 1 only, CC64 + CC123 on 16 ch, one
   note-off per note.
+- 2026-11-21: HOLD and STOP (PadSelection.releaseKept → ends the kept chord and the
+  pattern; HOLD stays on) beside AUTO above the pads. Top bar split to match the screen:
+  ⓘ, KEY, RANGE, SCALE, MIX, PANIC over the pads; plate instrument/EDIT/FX in a
+  300-wide group over the plate (top bar padding 20, gap 24, like the content).
 
