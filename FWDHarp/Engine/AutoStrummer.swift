@@ -5,9 +5,12 @@ import Foundation
 /// plugin loads) and are sent the moment they are due: never stamped ahead (FWD
 /// lesson 5).
 ///
-/// Each step is timed from the moment the pattern started, not from the step before,
-/// so small delays never add up into drift. A chord change while it runs keeps the
-/// beat going; lifting every pad (with Hold off) stops it.
+/// Each step is due one interval after the moment the previous step was DUE (not when
+/// it actually ran), so small delays never add up into drift. A tempo change takes
+/// effect from the next step without interrupting the beat: dragging the tempo used to
+/// restart the clock at every change, which held the pattern silent while the finger
+/// moved (Graham, 2026-11-21). A chord change keeps the beat going; lifting every pad
+/// (with Hold off) stops it.
 nonisolated final class AutoStrummer: @unchecked Sendable {
     private let engine: AudioEngineManager
     private let partID: UUID
@@ -23,10 +26,6 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
     /// Bumped to stop whatever is scheduled: a step from an older run does nothing.
     private var generation: UInt64 = 0
     private var running = false
-    private var startTime: DispatchTime = .now()
-    /// Beats already played before the tempo last changed, so a tempo change carries
-    /// on from where the beat is rather than jumping.
-    private var stepsBeforeTempoChange = 0
     private var sounding: [UInt8] = []
 
     init(engine: AudioEngineManager, partID: UUID) {
@@ -75,24 +74,9 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
         }
     }
 
+    /// The step already waiting keeps its time; every step after it uses the new tempo.
     func setTempo(_ newTempo: Double) {
-        locked {
-            guard newTempo != tempo else { return }
-            if running {
-                // Restart the clock from the next step, at the new speed.
-                let interval = AutoStrum.stepInterval(pattern, tempo: tempo)
-                let elapsed = Double(DispatchTime.now().uptimeNanoseconds &- startTime.uptimeNanoseconds) / 1e9
-                stepsBeforeTempoChange += Int(elapsed / max(interval, 0.001)) + 1
-                tempo = newTempo
-                generation &+= 1
-                // The next step one new interval from now: dragging the tempo sends
-                // many changes, and firing at each one would rattle off notes.
-                startTime = .now()
-                scheduleLocked(step: stepsBeforeTempoChange, offset: 1)
-            } else {
-                tempo = newTempo
-            }
-        }
+        locked { tempo = newTempo }
     }
 
     /// Stop and silence (leaving the screen, the app going to the background).
@@ -105,9 +89,7 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
     private func startLocked() {
         generation &+= 1
         running = true
-        startTime = .now()
-        stepsBeforeTempoChange = 0
-        scheduleLocked(step: 0, offset: 0)
+        schedule(step: 0, at: .now())
     }
 
     private func stopLocked() {
@@ -121,17 +103,14 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
         sounding = []
     }
 
-    /// `offset`: steps since `startTime`.
-    private func scheduleLocked(step: Int, offset: Int) {
-        let interval = AutoStrum.stepInterval(pattern, tempo: tempo)
-        let due = startTime + .nanoseconds(Int(Double(offset) * interval * 1e9))
+    private func schedule(step: Int, at due: DispatchTime) {
         let token = generation
         queue.asyncAfter(deadline: due) { [weak self] in
-            self?.fire(step: step, offset: offset, token: token)
+            self?.fire(step: step, due: due, token: token)
         }
     }
 
-    private func fire(step: Int, offset: Int, token: UInt64) {
+    private func fire(step: Int, due: DispatchTime, token: UInt64) {
         locked {
             guard token == generation, running, let chord else { return }
             releaseLocked()
@@ -142,7 +121,9 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
                 engine.playNote(trackID: partID, midiNote: note, velocity: AutoStrum.velocity)
             }
             sounding = notes
-            scheduleLocked(step: step + 1, offset: offset + 1)
+            // From when this step was due, at the tempo as it is now.
+            let interval = AutoStrum.stepInterval(pattern, tempo: tempo)
+            schedule(step: step + 1, at: due + .nanoseconds(Int(interval * 1e9)))
         }
     }
 

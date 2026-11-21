@@ -110,7 +110,10 @@ nonisolated struct PadLayout: Equatable {
 /// sus pads held, the last pressed counts.
 ///
 /// With Hold on, the last chord pad pressed stays chosen after it is lifted, until
-/// another is pressed; the modifiers still work live on it.
+/// another is pressed, and so do the modifiers it was played with (Graham,
+/// 2026-11-21): a modifier pressed on the kept chord stays on it after the thumb
+/// lifts. Pressing a chord pad takes the modifiers held at that moment, so pressing
+/// C again with the thumb off goes back to plain C.
 nonisolated struct PadSelection: Equatable {
     /// Chord pads held, in the order they were pressed.
     private(set) var held: [ChordPad] = []
@@ -119,15 +122,36 @@ nonisolated struct PadSelection: Equatable {
     private(set) var suspensionsHeld: [ChordPad] = []
 
     private(set) var isHolding = false
-    /// The last chord pad pressed, kept while Hold is on.
+    /// The last chord pad pressed, kept while Hold is on, with its modifiers.
     private(set) var latched: ChordPad?
+    private(set) var latchedSeventh = false
+    private(set) var latchedSuspension: Suspension?
 
     var current: ChordPad? { held.last ?? (isHolding ? latched : nil) }
 
+    /// The 7th and sus in force for the chord sounding now: those held, and with Hold
+    /// on, those kept with the chord.
+    var seventhInForce: Bool { seventhHeld || (isHolding && latched != nil && latchedSeventh) }
+    var suspensionInForce: Suspension? {
+        suspension ?? (isHolding && latched != nil ? latchedSuspension : nil)
+    }
+
     mutating func setHolding(_ on: Bool) {
         isHolding = on
-        // Off: the kept chord goes, so the plate plays only what is held.
-        if !on { latched = nil }
+        // Off: the kept chord goes, so the plate plays only what is held. On: only a
+        // chord being held now is kept, never one from before Hold was switched on.
+        clearLatch()
+        if on, let pad = held.last {
+            latched = pad
+            latchedSeventh = seventhHeld
+            latchedSuspension = suspension
+        }
+    }
+
+    private mutating func clearLatch() {
+        latched = nil
+        latchedSeventh = false
+        latchedSuspension = nil
     }
 
     var suspension: Suspension? {
@@ -148,14 +172,19 @@ nonisolated struct PadSelection: Equatable {
 
     mutating func press(_ pad: ChordPad) {
         switch pad {
-        case .seven: seventhHeld = true
+        case .seven:
+            seventhHeld = true
+            latchedSeventh = true
         case .sus2, .sus4:
             suspensionsHeld.removeAll { $0 == pad }
             suspensionsHeld.append(pad)
+            latchedSuspension = suspension
         default:
             held.removeAll { $0 == pad }
             held.append(pad)
             latched = pad
+            latchedSeventh = seventhHeld
+            latchedSuspension = suspension
         }
     }
 
@@ -171,16 +200,29 @@ nonisolated struct PadSelection: Equatable {
         held.removeAll()
         seventhHeld = false
         suspensionsHeld.removeAll()
-        latched = nil
+        clearLatch()
     }
 
-    /// The chord a pad plays in `key` with the modifiers held now; nil for a modifier.
+    /// The chord a pad plays in `key`; nil for a modifier. The pad sounding now takes
+    /// the modifiers in force (kept ones included); any other pad shows what pressing
+    /// it would play, with the modifiers held now.
     func chord(on pad: ChordPad, in key: MajorKey) -> Chord? {
         guard let degree = pad.degree else { return nil }
         var chord = key.chord(degree: degree)
-        if seventhHeld { chord = chord.withSeventh }
-        if let suspension { chord = chord.suspended(suspension) }
+        let sounding = pad == current
+        if sounding ? seventhInForce : seventhHeld { chord = chord.withSeventh }
+        if let suspension = sounding ? suspensionInForce : suspension { chord = chord.suspended(suspension) }
         return chord
+    }
+
+    /// Whether a modifier pad is in force: held, or kept with the chord by Hold.
+    func isInForce(_ pad: ChordPad) -> Bool {
+        switch pad {
+        case .seven: return seventhInForce
+        case .sus2: return suspensionInForce == .second
+        case .sus4: return suspensionInForce == .fourth
+        default: return false
+        }
     }
 
     /// The chord to play in `key`, or nil when no chord pad is held.

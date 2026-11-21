@@ -113,6 +113,10 @@ final class InstrumentStore: ObservableObject {
         setup.plateOctaves = min(max(octaves, StrumPlate.minimumOctaves), StrumPlate.maximumOctaves)
     }
 
+    func setPlatePattern(_ pattern: PlatePattern) {
+        setup.platePattern = pattern
+    }
+
     func setAutoStrumPattern(_ pattern: AutoStrumPattern) {
         setup.autoStrumPattern = pattern
     }

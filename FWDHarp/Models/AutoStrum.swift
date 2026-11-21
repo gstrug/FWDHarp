@@ -1,19 +1,25 @@
 import Foundation
 
 /// Auto-strum: with it on, pressing a chord pad sounds it, the app playing a pattern
-/// in time in place of the strumming hand (design brief). The first four patterns.
+/// in time in place of the strumming hand (design brief).
 ///
-/// Every pattern plays from the plate's own notes (the chord in the key, range and
-/// octave chosen), so auto-strum and hand strumming sit in the same place. The figure
-/// uses the plate's lowest strings: the chord once through plus the root on top
-/// (C E G C; with the 7th, C E G B♭ C).
+/// Every pattern plays from the plate's notes in straight order (the chord in the key
+/// and octave chosen), so auto-strum and hand strumming sit in the same place. The
+/// figure uses the plate's lowest strings: the chord once through plus the root on
+/// top (C E G C; with the 7th, C E G B♭ C), or twice through for the 2-octave ones.
 nonisolated enum AutoStrumPattern: String, CaseIterable, Codable {
-    case arpeggioUp, arpeggioUpDown, blockChords, bassAndChord, singleSweep
+    case arpeggioUp, arpeggioDown, arpeggioUpDown
+    case arpeggio2Up, arpeggio2Down, arpeggio2UpDown
+    case blockChords, bassAndChord, singleSweep
 
     var title: String {
         switch self {
         case .arpeggioUp: return "Arpeggio Up"
+        case .arpeggioDown: return "Arpeggio Down"
         case .arpeggioUpDown: return "Arpeggio Up-Down"
+        case .arpeggio2Up: return "2-Octave Up"
+        case .arpeggio2Down: return "2-Octave Down"
+        case .arpeggio2UpDown: return "2-Octave Up-Down"
         case .blockChords: return "Block Chords"
         case .bassAndChord: return "Bass + Chord"
         case .singleSweep: return "Single Sweep"
@@ -24,13 +30,22 @@ nonisolated enum AutoStrumPattern: String, CaseIterable, Codable {
     /// chord patterns. The single sweep has no rhythm.
     var stepsPerBeat: Int {
         switch self {
-        case .arpeggioUp, .arpeggioUpDown: return 2
+        case .arpeggioUp, .arpeggioDown, .arpeggioUpDown,
+             .arpeggio2Up, .arpeggio2Down, .arpeggio2UpDown: return 2
         case .blockChords, .bassAndChord: return 1
         case .singleSweep: return 0
         }
     }
 
     var isRhythmic: Bool { stepsPerBeat > 0 }
+
+    /// How many octaves an arpeggio spans.
+    var octaves: Int {
+        switch self {
+        case .arpeggio2Up, .arpeggio2Down, .arpeggio2UpDown: return 2
+        default: return 1
+        }
+    }
 }
 
 nonisolated enum AutoStrum {
@@ -42,29 +57,31 @@ nonisolated enum AutoStrum {
     /// The gap between strings in a single sweep: a quick harp glissando.
     static let sweepGap: Double = 0.025
 
-    /// The figure's notes: the chord once through from the plate's bottom string, plus
-    /// the next string (the root an octave up, for a chord in root position).
-    static func figure(plateNotes: [Int], chordSize: Int) -> [Int] {
-        Array(plateNotes.prefix(max(1, chordSize) + 1))
+    /// The figure's notes: the chord `octaves` times through from the plate's bottom
+    /// string, plus the next string (the root on top, for a chord in root position).
+    static func figure(plateNotes: [Int], chordSize: Int, octaves: Int = 1) -> [Int] {
+        Array(plateNotes.prefix(max(1, chordSize) * max(1, octaves) + 1))
     }
 
     /// The bass for Bass + Chord: the chord's root an octave below its lowest root on
     /// the plate, and the 5th above that bass (every chord the pads play has a 5th).
     static func bass(plateNotes: [Int], root: Int) -> (root: Int, fifth: Int)? {
-        guard let lowestRoot = plateNotes.first(where: { (($0 % 12) + 12) % 12 == root }) else { return nil }
-        let bassRoot = lowestRoot - 12 >= 0 ? lowestRoot - 12 : lowestRoot
-        return (bassRoot, bassRoot + 7)
+        StrumPlate.bass(of: Chord(root: root, quality: .major), below: plateNotes)
     }
 
     /// The notes started at `step` (counted from 0 when the pattern starts). Each
     /// step's notes are released when the next step starts.
     static func notes(_ pattern: AutoStrumPattern, step: Int, plateNotes: [Int], chord: Chord) -> [Int] {
-        let figure = figure(plateNotes: plateNotes, chordSize: chord.pitchClasses.count)
+        let figure = figure(plateNotes: plateNotes, chordSize: chord.pitchClasses.count,
+                            octaves: pattern.octaves)
         guard !figure.isEmpty else { return [] }
         switch pattern {
-        case .arpeggioUp:
+        case .arpeggioUp, .arpeggio2Up:
             return [figure[step % figure.count]]
-        case .arpeggioUpDown:
+        case .arpeggioDown, .arpeggio2Down:
+            let down = Array(figure.reversed())
+            return [down[step % down.count]]
+        case .arpeggioUpDown, .arpeggio2UpDown:
             // Up and back down without repeating the top and bottom: C E G C G E | C …
             let cycle = figure + figure.dropFirst().dropLast().reversed()
             return [cycle[step % cycle.count]]

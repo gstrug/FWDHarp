@@ -64,6 +64,8 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var octaveShift: Int = 0
     /// Auto-strum's pattern and speed. Whether it is on is not saved: it starts off.
     var autoStrumPattern: AutoStrumPattern = .arpeggioUp
+    /// The order of the notes up the plate for hand strumming.
+    var platePattern: PlatePattern = .straight
     var tempo: Double = AutoStrum.defaultTempo
 
     init() {}
@@ -94,7 +96,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic
-        case plateOctaves, octaveShift, autoStrumPattern, tempo
+        case plateOctaves, octaveShift, autoStrumPattern, tempo, platePattern
     }
 
     init(from decoder: Decoder) throws {
@@ -111,5 +113,6 @@ nonisolated struct HarpSetup: Codable, Equatable {
         // A pattern this version does not know (from a later one) falls back.
         autoStrumPattern = (try? c.decodeIfPresent(AutoStrumPattern.self, forKey: .autoStrumPattern)) ?? .arpeggioUp
         tempo = try c.decodeIfPresent(Double.self, forKey: .tempo) ?? AutoStrum.defaultTempo
+        platePattern = (try? c.decodeIfPresent(PlatePattern.self, forKey: .platePattern)) ?? .straight
     }
 }

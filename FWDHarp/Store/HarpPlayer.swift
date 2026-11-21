@@ -47,12 +47,26 @@ final class HarpPlayer: ObservableObject {
     var octaveShift: Int { store.setup.octaveShift }
     var plateOctaves: Int { store.setup.plateOctaves }
 
-    /// The note on each string for the chord held now, bottom string first; empty with
-    /// no chord held.
+    var platePattern: PlatePattern { store.setup.platePattern }
+
+    /// The note on each string for the chord held now, bottom string first, in the
+    /// plate pattern's order; empty with no chord held.
     var plateNotes: [Int] {
         guard let chord else { return [] }
         return StrumPlate.notes(for: chord, strings: stringCount,
+                                from: StrumPlate.lowestNote(in: key, octaveShift: octaveShift),
+                                pattern: platePattern)
+    }
+
+    /// The plate's notes in straight order, which auto-strum's figures are built from.
+    private var straightNotes: [Int] {
+        guard let chord else { return [] }
+        return StrumPlate.notes(for: chord, strings: stringCount,
                                 from: StrumPlate.lowestNote(in: key, octaveShift: octaveShift))
+    }
+
+    func setPlatePattern(_ pattern: PlatePattern) {
+        store.setPlatePattern(pattern)
     }
 
     /// The pad's chord in the current key, with the modifiers held now.
@@ -130,7 +144,7 @@ final class HarpPlayer: ObservableObject {
 
     /// Tell the strummer the chord and plate as they are now.
     private func syncAutoStrum(newPad: Bool) {
-        strummer.update(chord: chord, plateNotes: plateNotes, newPad: newPad)
+        strummer.update(chord: chord, plateNotes: straightNotes, newPad: newPad)
     }
 
     // MARK: Plate

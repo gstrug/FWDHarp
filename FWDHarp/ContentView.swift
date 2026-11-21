@@ -196,12 +196,37 @@ private struct RangeChips: View {
     }
 }
 
-/// Above the plate: the octave buttons that move it up or down.
+/// Above the plate: the order of its notes, and the octave buttons that move it.
 private struct PlateControls: View {
     @ObservedObject var player: HarpPlayer
 
     var body: some View {
         HStack(spacing: 8) {
+            Menu {
+                ForEach(PlatePattern.allCases, id: \.self) { pattern in
+                    Button {
+                        player.setPlatePattern(pattern)
+                    } label: {
+                        if pattern == player.platePattern {
+                            Label(pattern.title, systemImage: "checkmark")
+                        } else {
+                            Text(pattern.title)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(player.platePattern.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(StudioStyle.displayText)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(StudioStyle.scaleText)
+                }
+                .studioWindow()
+            }
+            .accessibilityLabel("Plate order: \(player.platePattern.title)")
             Spacer(minLength: 0)
             Text("OCT")
                 .font(.system(size: 11, weight: .bold)).tracking(0.8)

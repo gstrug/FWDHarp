@@ -17,7 +17,8 @@ struct PadsView: View {
                     PadFace(pad: pad,
                             chordName: player.chord(on: pad)?.name(preferFlats: player.key.prefersFlats),
                             isHeld: isHeld(pad),
-                            isSounding: player.selection.current == pad,
+                            isSounding: pad.isModifier ? player.selection.isInForce(pad)
+                                                       : player.selection.current == pad,
                             size: frame.size)
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX, y: frame.minY)

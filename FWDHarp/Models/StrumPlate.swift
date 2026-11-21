@@ -6,9 +6,8 @@ import Foundation
 ///
 /// The number of strings stays the same whatever the chord, so a strum lands in the
 /// same place on every chord: with the 7th added, the same strings simply cover a
-/// little less range. This first version has one pattern, Straight (the chord's notes
-/// in order, low to high); the other plate patterns wait for Graham's first playing
-/// test.
+/// little less range. The plate pattern sets the order of the notes up the strings
+/// (PlatePattern), so one sweep can play a broken-chord figure.
 nonisolated enum StrumPlate {
     /// The brief's starting range, 3 octaves of a three-note chord root to root (10
     /// strings), is also the narrowest: Graham likes that spread. Wider ranges put more
@@ -47,6 +46,52 @@ nonisolated enum StrumPlate {
         return result
     }
 
+    /// The note on each string in a plate pattern's order. Built from the straight run
+    /// of the chord's notes from `lowest`; strings that would go past the top of MIDI
+    /// are left off.
+    static func notes(for chord: Chord, strings: Int, from lowest: Int, pattern: PlatePattern) -> [Int] {
+        guard strings > 0 else { return [] }
+        // Enough of the straight run for every pattern to look ahead into.
+        let tones = notes(for: chord, strings: strings * 2 + 4, from: lowest)
+        guard !tones.isEmpty else { return [] }
+        func tone(_ index: Int) -> Int? { tones.indices.contains(index) ? tones[index] : nil }
+        var result: [Int?]
+        switch pattern {
+        case .straight:
+            result = (0..<strings).map { tone($0) }
+        case .alternating:
+            // Each chord note, then the one two above it: 1 5 3 8 5 10 …
+            result = (0..<strings).map { $0 % 2 == 0 ? tone($0 / 2) : tone($0 / 2 + 2) }
+        case .rolling:
+            // Two up, one back: 1 3 5 3 5 8 5 8 10 …
+            result = (0..<strings).map { tone($0 / 3 + $0 % 3) }
+        case .octaves:
+            // Each chord note with its octave: 1 8 3 10 5 12 …
+            result = (0..<strings).map { $0 % 2 == 0 ? tone($0 / 2) : tone($0 / 2).map { $0 + 12 } }
+        case .bassAndChord:
+            // The bottom strings rock between the root and 5th below the chord, the rest
+            // run straight up above them.
+            let bassStrings = max(2, Int(Double(strings) * 0.4))
+            guard let bass = bass(of: chord, below: tones) else {
+                result = (0..<strings).map { tone($0) }
+                break
+            }
+            result = (0..<strings).map { index in
+                if index < bassStrings { return index % 2 == 0 ? bass.root : bass.fifth }
+                return tone(index - bassStrings)
+            }
+        }
+        return result.compactMap { $0 }.filter { (0...127).contains($0) }
+    }
+
+    /// The chord's root an octave below its lowest root among `tones`, and the 5th
+    /// above that (every chord the pads play has a 5th).
+    static func bass(of chord: Chord, below tones: [Int]) -> (root: Int, fifth: Int)? {
+        guard let lowestRoot = tones.first(where: { (($0 % 12) + 12) % 12 == chord.root }) else { return nil }
+        let root = lowestRoot - 12 >= 0 ? lowestRoot - 12 : lowestRoot
+        return (root, root + 7)
+    }
+
     /// Which string is at a height, 0 at the bottom edge and 1 at the top.
     static func string(atHeight fraction: Double, strings: Int) -> Int {
         guard strings > 0 else { return 0 }
@@ -68,5 +113,22 @@ nonisolated enum StrumPlate {
         if to > from { return Array((from + 1)...to) }
         if to < from { return Array((to...(from - 1)).reversed()) }
         return []
+    }
+}
+
+/// The order of the notes up the plate's strings, for strumming by hand. Straight is
+/// the chord's notes low to high; the others make one sweep play a broken-chord figure
+/// (design brief, "Plate patterns"). Sweeping down plays the figure in reverse.
+nonisolated enum PlatePattern: String, CaseIterable, Codable {
+    case straight, alternating, rolling, octaves, bassAndChord
+
+    var title: String {
+        switch self {
+        case .straight: return "Straight"
+        case .alternating: return "Alternating"
+        case .rolling: return "Rolling"
+        case .octaves: return "Octaves"
+        case .bassAndChord: return "Bass + Chord"
+        }
     }
 }
