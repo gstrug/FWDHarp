@@ -210,4 +210,9 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   `PartInstrumentButtons`, pan knob, fader + meter, M; master). Meters: LevelMonitor +
   LevelBatcher copied from FWD. `.loadingOverlay(store)` / `.storeNotices(store)` on the
   main screen AND the mixer sheet. Next: MIDI out (a channel per part).
+- 2026-11-21: PANIC (HarpPlayer.panic → strummer.stop + engine.panic). Plate and
+  auto-strum always send note-off before note-on (same note on the same instrument could
+  stack note-ons and hang). Mixer is now `MixerPanel`, shown in place of the pads while
+  MIX is lit (plate stays playable); master strip first, all strips one size
+  (StripSize) so drums/bass strips can join.
 
