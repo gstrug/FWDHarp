@@ -229,8 +229,9 @@ final class InstrumentStore: ObservableObject {
         setup.keyTonic = key.tonic
     }
 
-    func setPlateOctaves(_ octaves: Int) {
-        setup.plateOctaves = min(max(octaves, StrumPlate.minimumOctaves), StrumPlate.maximumOctaves)
+    func setPlateStrings(_ strings: Int) {
+        guard StrumPlate.stringChoices.contains(strings) else { return }
+        setup.plateStrings = strings
     }
 
     func setPlateScale(_ scale: PlateScale) {
@@ -302,11 +303,13 @@ final class InstrumentStore: ObservableObject {
     var midiOut: MIDIOutSettings { setup.midiOut }
 
     func setMIDIOut(_ settings: MIDIOutSettings) {
-        let soundWasOn = setup.midiOut.internalSound
+        let before = setup.midiOut
         setup.midiOut = settings.normalized()
         router.setSettings(setup.midiOut)
-        // FWD Harp's own sound switched off: silence what its instruments are playing.
-        if soundWasOn, !setup.midiOut.internalSound { engine.allNotesOff() }
+        // A part's own sound switched off: silence what its instrument is playing.
+        for part in HarpPart.allCases where before.playsOwnSound(part) && !setup.midiOut.playsOwnSound(part) {
+            engine.allNotesOff()
+        }
     }
 
     /// A MIDI keyboard plays the plate's instrument directly: its notes, sustain pedal,

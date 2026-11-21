@@ -6,7 +6,8 @@ final class MIDIOutTests: XCTestCase {
     func testOffUntilAskedAndOwnSoundOn() throws {
         let settings = try SetupStorage.decode(Data("{}".utf8)).midiOut
         XCTAssertFalse(settings.enabled)
-        XCTAssertTrue(settings.internalSound)
+        XCTAssertTrue(settings.playsOwnSound(.plate))
+        XCTAssertTrue(settings.playsOwnSound(.auto))
         XCTAssertEqual(settings.channel(for: .plate), 1)
         XCTAssertEqual(settings.channel(for: .auto), 2)
     }
@@ -14,12 +15,13 @@ final class MIDIOutTests: XCTestCase {
     func testSettingsAreSavedAndKeptInRange() throws {
         var setup = HarpSetup()
         setup.midiOut.enabled = true
-        setup.midiOut.internalSound = false
+        setup.midiOut.setPlaysOwnSound(false, for: .auto)
         setup.midiOut.setChannel(5, for: .auto)
         setup.midiOut.destinations = [42, 42, 7]
         let back = try SetupStorage.decode(JSONEncoder().encode(setup)).midiOut
         XCTAssertTrue(back.enabled)
-        XCTAssertFalse(back.internalSound)
+        XCTAssertTrue(back.playsOwnSound(.plate))
+        XCTAssertFalse(back.playsOwnSound(.auto), "each part's own")
         XCTAssertEqual(back.autoChannel, 5)
         XCTAssertEqual(back.destinations, [42, 7], "each destination once")
         let bad = try SetupStorage.decode(Data(#"{"midiOut": {"plateChannel": 40, "autoChannel": 0}}"#.utf8)).midiOut
@@ -34,5 +36,11 @@ final class MIDIOutTests: XCTestCase {
         XCTAssertEqual(MIDIBytes.noteOn(60, velocity: 0, channel: 1)[2], 1,
                        "a note-on is never velocity 0, which would mean note-off")
         XCTAssertEqual(MIDIBytes.panic(channel: 16), [0xBF, 64, 0, 0xBF, 123, 0])
+    }
+
+    func testTheOldSingleSwitchCoversBothParts() throws {
+        let old = try SetupStorage.decode(Data(#"{"midiOut": {"internalSound": false}}"#.utf8)).midiOut
+        XCTAssertFalse(old.playsOwnSound(.plate))
+        XCTAssertFalse(old.playsOwnSound(.auto))
     }
 }

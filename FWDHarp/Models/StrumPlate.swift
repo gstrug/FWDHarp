@@ -4,24 +4,26 @@ import Foundation
 /// low at the bottom, each playing one note of the held chord, rising up the plate.
 /// Touching further right plays louder.
 ///
-/// The number of strings stays the same whatever the chord, so a strum lands in the
-/// same place on every chord: with the 7th added, the same strings simply cover a
-/// little less range. The plate pattern sets the order of the notes up the strings
-/// (PlatePattern), so one sweep can play a broken-chord figure.
+/// The number of strings is chosen (STRINGS) and stays the same whatever the chord or
+/// scale, like a real harp's, so a strum lands in the same place every time and the
+/// strings never crowd (Graham, 2026-11-21: Chromatic over 3 octaves made 37 strings).
+/// More notes per octave simply means the same strings cover less range. The plate
+/// pattern sets the order of the notes up the strings (PlatePattern), so one sweep can
+/// play a broken-chord figure.
 nonisolated enum StrumPlate {
-    /// The brief's starting range, 3 octaves of a three-note chord root to root (10
-    /// strings), is also the narrowest: Graham likes that spread. Wider ranges put more
-    /// strings in the same height.
-    static let minimumOctaves = 3
-    static let maximumOctaves = 5
-    static let octaveRange = minimumOctaves...maximumOctaves
+    /// 10 is the spread Graham likes (3 octaves of a three-note chord, root to root),
+    /// and the fewest.
+    static let stringChoices = [10, 13, 16, 20, 24]
+    static let defaultStrings = 10
     /// How far the octave buttons move the plate, in octaves.
     static let octaveShiftRange = -2...2
     /// Softest and loudest, left edge to right edge.
     static let softestVelocity = 30
     static let loudestVelocity = 127
 
-    static func stringCount(octaves: Int) -> Int {
+    /// The string count a setup saved with the old RANGE (3, 4 or 5 octaves of a
+    /// chord) had.
+    static func strings(forOldOctaves octaves: Int) -> Int {
         max(1, octaves) * 3 + 1
     }
 
@@ -59,25 +61,17 @@ nonisolated enum StrumPlate {
         return ordered(tones, strings: strings, pattern: pattern, bass: bass(of: chord, below: tones))
     }
 
-    /// A scale on the plate (PlateScale): its notes up from the scale's root, as many
-    /// strings as the range's octaves hold, in the plate pattern's order. Bass + Chord
-    /// has no chord to take a bass from here, so it plays Straight.
-    static func notes(for scale: PlateScale, in key: MajorKey, octaves: Int, octaveShift: Int,
-                      pattern: PlatePattern) -> [Int] {
-        guard let classes = scale.pitchClasses(in: key) else { return [] }
-        let strings = stringCount(octaves: octaves, scale: scale)
-        let lowest = 48 + scale.root(in: key) + 12 * octaveShift
-        let tones = notes(pitchClasses: classes, strings: strings * 2 + 4, from: lowest)
+    /// A scale on the plate (PlateScale), one note per string up from the plate's
+    /// bottom (the key's note, moved by OCT), in the plate pattern's order. Pentatonic
+    /// and Blues follow `chord`, the one held now. Bass + Chord has no chord to take a
+    /// bass from, so it plays Straight.
+    static func notes(for scale: PlateScale, in key: MajorKey, chord: Chord?, strings: Int,
+                      octaveShift: Int, pattern: PlatePattern) -> [Int] {
+        guard let classes = scale.pitchClasses(in: key, chord: chord) else { return [] }
+        let tones = notes(pitchClasses: classes, strings: strings * 2 + 4,
+                          from: lowestNote(in: key, octaveShift: octaveShift))
         return ordered(tones, strings: strings, pattern: pattern == .bassAndChord ? .straight : pattern,
                        bass: nil)
-    }
-
-    /// Strings on the plate: for a chord, 3 an octave plus the top root (the spread
-    /// Graham likes); for a scale, every note of it across the same octaves, so a scale
-    /// is never missing notes.
-    static func stringCount(octaves: Int, scale: PlateScale) -> Int {
-        guard let perOctave = scale.notesPerOctave else { return stringCount(octaves: octaves) }
-        return max(1, octaves) * perOctave + 1
     }
 
     /// The straight run `tones` put in a plate pattern's order, one note per string.
@@ -163,9 +157,15 @@ nonisolated enum PlatePattern: String, CaseIterable, Codable {
     }
 }
 
-/// What the plate plays: the held chord's notes (the default), or a scale in the key,
-/// which limits the plate to that scale's notes so a melody or solo cannot hit a wrong
-/// note (design brief, "Scales"). A scale plays whether or not a pad is held.
+/// What the plate plays: the held chord's notes (the default), or a scale, which
+/// limits the plate to that scale's notes so a melody or solo cannot hit a wrong note
+/// (design brief, "Scales"). A scale plays whether or not a pad is held.
+///
+/// Major, Natural Minor and Chromatic are the key's. Pentatonic and Blues FOLLOW THE
+/// CHORD held (Graham, 2026-11-21: Blues on the key's note clashed with the other
+/// chords): built on its root, major over a major chord (C D E G A; blues C D E♭ E G
+/// A), minor over a minor or sus4 chord (A C D E G; blues A C D E♭ E G). With no chord
+/// held, on the key's note, major.
 nonisolated enum PlateScale: String, CaseIterable, Codable {
     case chord, major, pentatonic, blues, naturalMinor, chromatic
 
@@ -180,29 +180,46 @@ nonisolated enum PlateScale: String, CaseIterable, Codable {
         }
     }
 
-    /// Semitones above the scale's root; nil for Chord.
-    var intervals: [Int]? {
+    var followsChord: Bool { self == .pentatonic || self == .blues }
+
+    /// Semitones above the scale's root; nil for Chord. `minor` picks the minor form of
+    /// the scales that follow the chord.
+    func intervals(minor: Bool = false) -> [Int]? {
         switch self {
         case .chord: return nil
         case .major: return [0, 2, 4, 5, 7, 9, 11]
-        case .pentatonic: return [0, 2, 4, 7, 9]                // major pentatonic
-        case .blues: return [0, 3, 5, 6, 7, 10]                 // C E♭ F F♯ G B♭ in C
-        case .naturalMinor: return [0, 2, 3, 5, 7, 8, 10]
+        case .pentatonic: return minor ? [0, 3, 5, 7, 10] : [0, 2, 4, 7, 9]
+        case .blues: return minor ? [0, 3, 5, 6, 7, 10] : [0, 2, 3, 4, 7, 9]
+        case .naturalMinor: return [0, 2, 3, 5, 7, 8, 10]   // the key's relative minor
         case .chromatic: return Array(0..<12)
         }
     }
 
-    var notesPerOctave: Int? { intervals?.count }
-
-    /// The scale's own note: the key's note, except Natural Minor, which is the key's
-    /// relative minor (A minor in C), so it shares the key's notes.
-    func root(in key: MajorKey) -> Int {
-        self == .naturalMinor ? (key.tonic + 9) % 12 : key.tonic
+    /// Whether a chord takes the minor form: it has a minor 3rd, or a 4th in its
+    /// place (sus4), which the minor scales carry and the major ones clash with.
+    static func isMinorFlavour(_ chord: Chord) -> Bool {
+        let intervals = chord.quality.intervals
+        return intervals.contains(3) || (intervals.contains(5) && !intervals.contains(4))
     }
 
-    func pitchClasses(in key: MajorKey) -> Set<Int>? {
-        guard let intervals else { return nil }
-        let root = root(in: key)
+    /// The pitch classes the plate plays, in `key`, with `chord` held (or none).
+    func pitchClasses(in key: MajorKey, chord: Chord?) -> Set<Int>? {
+        let root: Int
+        let minor: Bool
+        switch self {
+        case .chord:
+            return nil
+        case .pentatonic, .blues:
+            root = chord?.root ?? key.tonic
+            minor = chord.map(Self.isMinorFlavour) ?? false
+        case .naturalMinor:
+            root = (key.tonic + 9) % 12
+            minor = false
+        case .major, .chromatic:
+            root = key.tonic
+            minor = false
+        }
+        guard let intervals = intervals(minor: minor) else { return nil }
         return Set(intervals.map { (root + $0) % 12 })
     }
 }

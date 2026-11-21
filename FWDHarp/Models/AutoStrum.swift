@@ -69,11 +69,34 @@ nonisolated enum AutoStrum {
         StrumPlate.bass(of: Chord(root: root, quality: .major), below: plateNotes)
     }
 
+    /// The arpeggio figure with the scale's colour (Graham, 2026-11-21): between each
+    /// pair of chord notes, the scale note just below the upper one, if there is one,
+    /// as a passing note leading into it. Over C with C blues: C E♭ E G A C (the blue
+    /// note slides into E); with the major scale: C D E F G B C. The chord stays in
+    /// charge: never more than one passing note between two chord notes.
+    static func colouredFigure(_ figure: [Int], scale: Set<Int>) -> [Int] {
+        guard figure.count > 1 else { return figure }
+        var result = [figure[0]]
+        for (low, high) in zip(figure, figure.dropFirst()) {
+            if let passing = stride(from: high - 1, to: low, by: -1)
+                .first(where: { scale.contains((($0 % 12) + 12) % 12) }) {
+                result.append(passing)
+            }
+            result.append(high)
+        }
+        return result
+    }
+
     /// The notes started at `step` (counted from 0 when the pattern starts). Each
-    /// step's notes are released when the next step starts.
-    static func notes(_ pattern: AutoStrumPattern, step: Int, plateNotes: [Int], chord: Chord) -> [Int] {
-        let figure = figure(plateNotes: plateNotes, chordSize: chord.pitchClasses.count,
-                            octaves: pattern.octaves)
+    /// step's notes are released when the next step starts. With a `scale` chosen on
+    /// the plate, the arpeggios take its colour (colouredFigure); the chord patterns
+    /// stay chords.
+    static func notes(_ pattern: AutoStrumPattern, step: Int, plateNotes: [Int], chord: Chord,
+                      scale: Set<Int>? = nil) -> [Int] {
+        let plain = figure(plateNotes: plateNotes, chordSize: chord.pitchClasses.count,
+                           octaves: pattern.octaves)
+        let isArpeggio = pattern.stepsPerBeat == 2
+        let figure = isArpeggio ? scale.map { colouredFigure(plain, scale: $0) } ?? plain : plain
         guard !figure.isEmpty else { return [] }
         switch pattern {
         case .arpeggioUp, .arpeggio2Up:

@@ -51,7 +51,7 @@ nonisolated final class NoteRouter: @unchecked Sendable {
 
     func play(_ part: HarpPart, note: UInt8, velocity: UInt8) {
         locked {
-            if settings.internalSound, let track = tracks[part] {
+            if settings.playsOwnSound(part), let track = tracks[part] {
                 engine.playNote(trackID: track, midiNote: note, velocity: velocity)
             }
             guard settings.enabled else { return }

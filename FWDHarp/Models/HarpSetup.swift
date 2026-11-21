@@ -57,9 +57,8 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var keyTonic: Int = 0
 
     var key: MajorKey { MajorKey(tonic: keyTonic) }
-    /// How many octaves the strum plate covers (StrumPlate.octaveRange); more octaves
-    /// means more strings in the same height.
-    var plateOctaves: Int = StrumPlate.minimumOctaves
+    /// How many strings the plate has (StrumPlate.stringChoices), whatever it plays.
+    var plateStrings: Int = StrumPlate.defaultStrings
     /// The plate moved up or down by whole octaves (StrumPlate.octaveShiftRange).
     var octaveShift: Int = 0
     /// Auto-strum's pattern and speed. Whether it is on is not saved: it starts off.
@@ -124,7 +123,11 @@ nonisolated struct HarpSetup: Codable, Equatable {
     func normalized() -> HarpSetup {
         var copy = self
         if !(0..<12).contains(copy.keyTonic) { copy.keyTonic = 0 }
-        if !StrumPlate.octaveRange.contains(copy.plateOctaves) { copy.plateOctaves = StrumPlate.minimumOctaves }
+        if !StrumPlate.stringChoices.contains(copy.plateStrings) {
+            // The nearest choice, so a count from a later version still lands sensibly.
+            copy.plateStrings = StrumPlate.stringChoices.min { abs($0 - copy.plateStrings) < abs($1 - copy.plateStrings) }
+                ?? StrumPlate.defaultStrings
+        }
         if !StrumPlate.octaveShiftRange.contains(copy.octaveShift) { copy.octaveShift = 0 }
         if !AutoStrum.tempoRange.contains(copy.tempo) || !copy.tempo.isFinite { copy.tempo = AutoStrum.defaultTempo }
         copy.plateSound = copy.plateSound.normalized()
@@ -139,9 +142,12 @@ nonisolated struct HarpSetup: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic
-        case plateOctaves, octaveShift, autoStrumPattern, tempo, platePattern, plateScale
+        case plateStrings, octaveShift, autoStrumPattern, tempo, platePattern, plateScale
         case autoSound, plateMix, autoMix, masterVolume, plateRing, midiOut
     }
+
+    /// Read from older files, never written.
+    private enum LegacyKeys: String, CodingKey { case plateOctaves }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -152,7 +158,15 @@ nonisolated struct HarpSetup: Codable, Equatable {
         effects = try c.decodeIfPresent([PluginSlot].self, forKey: .effects) ?? []
         effectsBypassed = try c.decodeIfPresent(Bool.self, forKey: .effectsBypassed) ?? false
         keyTonic = try c.decodeIfPresent(Int.self, forKey: .keyTonic) ?? 0
-        plateOctaves = try c.decodeIfPresent(Int.self, forKey: .plateOctaves) ?? StrumPlate.minimumOctaves
+        // A setup saved with the old RANGE in octaves keeps the same strings it had.
+        if let strings = try c.decodeIfPresent(Int.self, forKey: .plateStrings) {
+            plateStrings = strings
+        } else if let octaves = try decoder.container(keyedBy: LegacyKeys.self)
+                    .decodeIfPresent(Int.self, forKey: .plateOctaves) {
+            plateStrings = StrumPlate.strings(forOldOctaves: octaves)
+        } else {
+            plateStrings = StrumPlate.defaultStrings
+        }
         octaveShift = try c.decodeIfPresent(Int.self, forKey: .octaveShift) ?? 0
         // A pattern this version does not know (from a later one) falls back.
         autoStrumPattern = (try? c.decodeIfPresent(AutoStrumPattern.self, forKey: .autoStrumPattern)) ?? .arpeggioUp

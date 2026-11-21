@@ -7,8 +7,11 @@ import Foundation
 nonisolated struct MIDIOutSettings: Codable, Equatable {
     /// Send MIDI at all. Off by default: nothing leaves the app until asked.
     var enabled = false
-    /// FWD Harp's own instruments still play. Off makes it a controller only.
-    var internalSound = true
+    /// Each part's own instrument in FWD Harp still plays (Graham, 2026-11-21: per
+    /// part, so one can sound here while the other plays only in another app). Both
+    /// off makes FWD Harp a controller only.
+    var plateInternalSound = true
+    var autoInternalSound = true
     /// Channels 1–16, as people number them.
     var plateChannel = 1
     var autoChannel = 2
@@ -20,6 +23,14 @@ nonisolated struct MIDIOutSettings: Codable, Equatable {
     static let channelRange = 1...16
 
     init() {}
+
+    func playsOwnSound(_ part: HarpPart) -> Bool {
+        part == .plate ? plateInternalSound : autoInternalSound
+    }
+
+    mutating func setPlaysOwnSound(_ on: Bool, for part: HarpPart) {
+        if part == .plate { plateInternalSound = on } else { autoInternalSound = on }
+    }
 
     func channel(for part: HarpPart) -> Int {
         part == .plate ? plateChannel : autoChannel
@@ -40,13 +51,19 @@ nonisolated struct MIDIOutSettings: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case enabled, internalSound, plateChannel, autoChannel, destinations
+        case enabled, plateInternalSound, autoInternalSound, plateChannel, autoChannel, destinations
     }
+
+    /// Read from files saved when one switch covered both parts.
+    private enum LegacyKeys: String, CodingKey { case internalSound }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
-        internalSound = try c.decodeIfPresent(Bool.self, forKey: .internalSound) ?? true
+        let both = try decoder.container(keyedBy: LegacyKeys.self)
+            .decodeIfPresent(Bool.self, forKey: .internalSound) ?? true
+        plateInternalSound = try c.decodeIfPresent(Bool.self, forKey: .plateInternalSound) ?? both
+        autoInternalSound = try c.decodeIfPresent(Bool.self, forKey: .autoInternalSound) ?? both
         plateChannel = try c.decodeIfPresent(Int.self, forKey: .plateChannel) ?? 1
         autoChannel = try c.decodeIfPresent(Int.self, forKey: .autoChannel) ?? 2
         destinations = try c.decodeIfPresent([Int32].self, forKey: .destinations) ?? []

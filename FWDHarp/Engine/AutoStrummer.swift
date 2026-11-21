@@ -21,6 +21,8 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
     private var tempo: Double = AutoStrum.defaultTempo
     private var chord: Chord?
     private var plateNotes: [Int] = []
+    /// The scale chosen on the plate, for the arpeggios' colour; nil for Chord.
+    private var scale: Set<Int>?
     /// Bumped to stop whatever is scheduled: a step from an older run does nothing.
     private var generation: UInt64 = 0
     private var running = false
@@ -36,10 +38,11 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
 
     /// The chord to play now (nil: none), from the plate's notes. `newPad` is true
     /// when a different chord pad was pressed, which is what triggers a single sweep.
-    func update(chord: Chord?, plateNotes: [Int], newPad: Bool) {
+    func update(chord: Chord?, plateNotes: [Int], scale: Set<Int>?, newPad: Bool) {
         locked {
             self.chord = chord
             self.plateNotes = plateNotes
+            self.scale = scale
             guard enabled else { return }
             if chord == nil {
                 stopLocked()
@@ -120,7 +123,7 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
         locked {
             guard token == generation, running, let chord else { return }
             releaseLocked()
-            let notes = AutoStrum.notes(pattern, step: step, plateNotes: plateNotes, chord: chord)
+            let notes = AutoStrum.notes(pattern, step: step, plateNotes: plateNotes, chord: chord, scale: scale)
                 .filter { (0...127).contains($0) }
                 .map { UInt8($0) }
             for note in notes {

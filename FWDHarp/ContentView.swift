@@ -82,7 +82,7 @@ struct ContentView: View {
             // Everything that belongs to the plate, on the right over it: its range and
             // scale, then its instrument, EDIT and FX (Graham, 2026-11-21).
             HStack(spacing: 10) {
-                RangeChips(player: player)
+                StringsMenu(player: player)
                 ScaleMenu(player: player)
                 PartInstrumentButtons(store: store, part: .plate)
                 EffectsToggleButton(store: store, part: .plate)
@@ -118,28 +118,27 @@ struct ContentView: View {
     }
 }
 
-/// The plate's range, beside Hold: more octaves, more strings in the same height.
-private struct RangeChips: View {
+/// How many strings the plate has, whatever it plays: always that many, so the
+/// strings never crowd (Graham, 2026-11-21).
+private struct StringsMenu: View {
     @ObservedObject var player: HarpPlayer
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text("RANGE")
-                .font(.system(size: 11, weight: .bold)).tracking(0.8)
-                .foregroundStyle(StudioStyle.scaleText)
-            ForEach(Array(StrumPlate.octaveRange), id: \.self) { octaves in
-                StudioChipLabel(title: "\(octaves)", tint: StudioStyle.displayText,
-                                look: player.plateOctaves == octaves ? .on : .off)
-                    .onTapGesture { player.setPlateOctaves(octaves) }
-                    .accessibilityElement()
-                    .accessibilityAddTraits(player.plateOctaves == octaves ? [.isButton, .isSelected] : .isButton)
-                    .accessibilityLabel("Range \(octaves) octaves")
+        StudioMenu(title: "STRINGS \(player.stringCount)", label: "Strings on the plate") {
+            ForEach(StrumPlate.stringChoices, id: \.self) { count in
+                Button { player.setPlateStrings(count) } label: {
+                    if count == player.stringCount {
+                        Label("\(count) strings", systemImage: "checkmark")
+                    } else {
+                        Text("\(count) strings")
+                    }
+                }
             }
         }
     }
 }
 
-/// What the plate plays, after RANGE: the chord held, or a scale in the key.
+/// What the plate plays, after STRINGS: the chord held, or a scale in the key.
 private struct ScaleMenu: View {
     @ObservedObject var player: HarpPlayer
 

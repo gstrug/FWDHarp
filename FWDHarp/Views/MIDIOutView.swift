@@ -21,12 +21,21 @@ struct MIDIOutView: View {
                 Section {
                     Toggle("Send MIDI", isOn: Binding(get: { settings.enabled },
                                                       set: { on in change { $0.enabled = on } }))
-                    Toggle("Play FWD Harp's own sound", isOn: Binding(
-                        get: { settings.internalSound },
-                        set: { on in change { $0.internalSound = on } }))
                 } footer: {
-                    Text("Other apps can choose \"FWD Harp\" as their MIDI input. "
-                         + "Switch FWD Harp's own sound off to use it purely as a controller.")
+                    Text("Other apps can choose \"FWD Harp\" as their MIDI input.")
+                }
+
+                Section {
+                    ForEach(HarpPart.allCases, id: \.self) { part in
+                        Toggle(part.title, isOn: Binding(
+                            get: { settings.playsOwnSound(part) },
+                            set: { on in change { $0.setPlaysOwnSound(on, for: part) } }))
+                    }
+                } header: {
+                    Text("Play FWD Harp's own sound")
+                } footer: {
+                    Text("Switch a part off to hear it only in the other app. Both off makes "
+                         + "FWD Harp purely a controller.")
                 }
 
                 Section {

@@ -199,47 +199,80 @@ final class ScaleTests: XCTestCase {
         notes.map { NoteNames.name($0 % 12, preferFlats: true) }
     }
 
-    func testAScaleFillsEveryNoteAcrossTheRange() {
-        XCTAssertEqual(StrumPlate.stringCount(octaves: 3, scale: .chord), 10, "chords keep their spread")
-        XCTAssertEqual(StrumPlate.stringCount(octaves: 3, scale: .major), 22)
-        XCTAssertEqual(StrumPlate.stringCount(octaves: 3, scale: .pentatonic), 16)
-        XCTAssertEqual(StrumPlate.stringCount(octaves: 3, scale: .chromatic), 37)
-        let major = StrumPlate.notes(for: .major, in: c, octaves: 3, octaveShift: 0, pattern: .straight)
-        XCTAssertEqual(major.count, 22)
-        XCTAssertEqual(major.first, 48)
-        XCTAssertEqual(major.last, 84, "C3 to C6")
+    private func plate(_ scale: PlateScale, key: MajorKey? = nil, chord: Chord? = nil, strings: Int = 10,
+                       shift: Int = 0, pattern: PlatePattern = .straight) -> [Int] {
+        StrumPlate.notes(for: scale, in: key ?? c, chord: chord, strings: strings, octaveShift: shift,
+                         pattern: pattern)
     }
 
-    func testTheScales() {
-        func first(_ scale: PlateScale, _ count: Int) -> [String] {
-            names(Array(StrumPlate.notes(for: scale, in: c, octaves: 3, octaveShift: 0,
-                                         pattern: .straight).prefix(count)))
+    func testEveryScaleHasTheStringsChosen() {
+        for scale in PlateScale.allCases where scale != .chord {
+            XCTAssertEqual(plate(scale, strings: 13).count, 13, scale.title)
         }
-        XCTAssertEqual(first(.major, 8), ["C", "D", "E", "F", "G", "A", "B", "C"])
-        XCTAssertEqual(first(.pentatonic, 6), ["C", "D", "E", "G", "A", "C"])
-        XCTAssertEqual(first(.blues, 7), ["C", "E♭", "F", "G♭", "G", "B♭", "C"])
-        XCTAssertEqual(first(.naturalMinor, 8), ["A", "B", "C", "D", "E", "F", "G", "A"],
-                       "the relative minor, starting on A")
-        XCTAssertEqual(first(.chromatic, 3), ["C", "D♭", "D"])
+        XCTAssertEqual(plate(.chromatic, strings: 13), Array(48...60), "one octave, never crowded")
     }
 
-    func testScalesFollowTheKeyAndOctave() {
-        let g = StrumPlate.notes(for: .pentatonic, in: MajorKey(tonic: 7), octaves: 3, octaveShift: -1,
-                                 pattern: .straight)
+    func testTheKeysScales() {
+        XCTAssertEqual(names(plate(.major, strings: 8)), ["C", "D", "E", "F", "G", "A", "B", "C"])
+        XCTAssertEqual(Set(names(plate(.naturalMinor, strings: 7))), ["A", "B", "C", "D", "E", "F", "G"],
+                       "A minor's notes: the key's relative minor")
+        XCTAssertEqual(names(plate(.chromatic, strings: 3)), ["C", "D♭", "D"])
+    }
+
+    func testPentatonicAndBluesFollowTheChord() {
+        XCTAssertEqual(names(plate(.pentatonic, strings: 5)), ["C", "D", "E", "G", "A"], "no chord: the key's")
+        let g = c.chord(degree: 5)
+        XCTAssertEqual(Set(names(plate(.pentatonic, chord: g, strings: 5))), ["G", "A", "B", "D", "E"],
+                       "over G: G major pentatonic")
+        let am = c.chord(degree: 6)
+        XCTAssertEqual(Set(names(plate(.pentatonic, chord: am, strings: 5))), ["A", "C", "D", "E", "G"],
+                       "over Am: A minor pentatonic")
+        XCTAssertEqual(Set(names(plate(.blues, chord: c.chord(degree: 1), strings: 6))),
+                       ["C", "D", "E♭", "E", "G", "A"], "over C: C major blues")
+        XCTAssertEqual(Set(names(plate(.blues, chord: c.chord(degree: 4), strings: 6))),
+                       ["F", "G", "A♭", "A", "C", "D"], "over F: F major blues, which fits F")
+        XCTAssertEqual(Set(names(plate(.blues, chord: am, strings: 6))),
+                       ["A", "C", "D", "E♭", "E", "G"], "over Am: A minor blues")
+        XCTAssertEqual(Set(names(plate(.blues, chord: am.withSeventh, strings: 6))),
+                       ["A", "C", "D", "E♭", "E", "G"], "Am7 is minor too")
+        XCTAssertTrue(PlateScale.isMinorFlavour(c.chord(degree: 1).suspended(.fourth)), "sus4 takes the minor form")
+        XCTAssertFalse(PlateScale.isMinorFlavour(c.chord(degree: 1).suspended(.second)))
+    }
+
+    func testTheMajorScaleStaysInTheKeyOverAnyChord() {
+        XCTAssertEqual(plate(.major, chord: c.chord(degree: 5)), plate(.major), "no F♯ over G in C")
+    }
+
+    func testScalesStartAtThePlatesBottomAndFollowTheOctave() {
+        let g = plate(.pentatonic, key: MajorKey(tonic: 7), shift: -1)
         XCTAssertEqual(g.first, 43, "G2")
-        XCTAssertEqual(names(Array(g.prefix(5))), ["G", "A", "B", "D", "E"])
+        XCTAssertEqual(plate(.blues, chord: c.chord(degree: 5)).first, 50,
+                       "the scale's first note from the plate's bottom (C3), whatever the chord: D3 over G")
     }
 
     func testPlateOrdersWorkOnScales() {
-        let alternating = StrumPlate.notes(for: .major, in: c, octaves: 3, octaveShift: 0, pattern: .alternating)
-        XCTAssertEqual(Array(alternating.prefix(4)), [48, 52, 50, 53], "C E D F: in thirds")
-        let bass = StrumPlate.notes(for: .major, in: c, octaves: 3, octaveShift: 0, pattern: .bassAndChord)
-        XCTAssertEqual(bass, StrumPlate.notes(for: .major, in: c, octaves: 3, octaveShift: 0, pattern: .straight),
-                       "no chord to take a bass from, so straight")
+        XCTAssertEqual(Array(plate(.major, pattern: .alternating).prefix(4)), [48, 52, 50, 53], "C E D F: in thirds")
+        XCTAssertEqual(plate(.major, pattern: .bassAndChord), plate(.major), "no chord to take a bass from, so straight")
     }
 
     func testChordMeansNoScale() {
-        XCTAssertEqual(StrumPlate.notes(for: .chord, in: c, octaves: 3, octaveShift: 0, pattern: .straight), [])
+        XCTAssertEqual(plate(.chord), [])
+    }
+
+    func testArpeggiosTakeTheScalesColour() {
+        let plain = [48, 52, 55, 60]                         // C E G C
+        let blues = PlateScale.blues.pitchClasses(in: c, chord: c.chord(degree: 1))!
+        XCTAssertEqual(AutoStrum.colouredFigure(plain, scale: blues), [48, 51, 52, 55, 57, 60],
+                       "C E♭ E G A C: the blue note slides into E")
+        let major = PlateScale.major.pitchClasses(in: c, chord: nil)!
+        XCTAssertEqual(AutoStrum.colouredFigure(plain, scale: major), [48, 50, 52, 53, 55, 59, 60],
+                       "at most one passing note between chord notes")
+        let notes = StrumPlate.notes(for: c.chord(degree: 1), strings: 10, from: 48)
+        let up = (0..<6).flatMap { AutoStrum.notes(.arpeggioUp, step: $0, plateNotes: notes,
+                                                   chord: c.chord(degree: 1), scale: blues) }
+        XCTAssertEqual(up, [48, 51, 52, 55, 57, 60])
+        XCTAssertEqual(AutoStrum.notes(.blockChords, step: 0, plateNotes: notes, chord: c.chord(degree: 1),
+                                       scale: blues), [48, 52, 55, 60], "chord patterns stay chords")
     }
 
     func testTheScaleIsSaved() throws {

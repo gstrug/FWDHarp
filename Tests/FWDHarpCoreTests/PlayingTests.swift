@@ -145,7 +145,7 @@ final class PadTests: XCTestCase {
 
 final class StrumPlateTests: XCTestCase {
     func testThreeOctavesOfAChordRootToRoot() {
-        let strings = StrumPlate.stringCount(octaves: 3)
+        let strings = StrumPlate.defaultStrings
         XCTAssertEqual(strings, 10)
         let c = MajorKey(tonic: 0)
         let notes = StrumPlate.notes(for: c.chord(degree: 1), strings: strings,
@@ -190,8 +190,9 @@ final class StrumPlateTests: XCTestCase {
         XCTAssertEqual(StrumPlate.strings(crossedFrom: 3, to: 3), [])
     }
 
-    func testWiderRangesAddStrings() {
-        XCTAssertEqual(StrumPlate.octaveRange.map(StrumPlate.stringCount(octaves:)), [10, 13, 16])
+    func testStringChoices() {
+        XCTAssertEqual(StrumPlate.stringChoices, [10, 13, 16, 20, 24])
+        XCTAssertEqual(StrumPlate.defaultStrings, 10, "the spread Graham likes")
     }
 
     func testTheOctaveButtonsMoveThePlate() {
@@ -203,18 +204,22 @@ final class StrumPlateTests: XCTestCase {
         XCTAssertTrue(high.allSatisfy { $0 <= 127 }, "never past the top of MIDI")
     }
 
-    func testRangeAndOctaveAreSavedAndKeptInBounds() throws {
+    func testStringsAndOctaveAreSavedAndKeptInBounds() throws {
         var setup = HarpSetup()
-        setup.plateOctaves = 5
+        setup.plateStrings = 20
         setup.octaveShift = -1
         let back = try SetupStorage.decode(JSONEncoder().encode(setup))
-        XCTAssertEqual(back.plateOctaves, 5)
+        XCTAssertEqual(back.plateStrings, 20)
         XCTAssertEqual(back.octaveShift, -1)
-        let bad = try SetupStorage.decode(Data(#"{"plateOctaves": 9, "octaveShift": 7}"#.utf8))
-        XCTAssertEqual(bad.plateOctaves, 3)
+        let bad = try SetupStorage.decode(Data(#"{"plateStrings": 18, "octaveShift": 7}"#.utf8))
+        XCTAssertEqual(bad.plateStrings, 16, "to the nearest choice")
         XCTAssertEqual(bad.octaveShift, 0)
-        let old = try SetupStorage.decode(Data("{}".utf8))
-        XCTAssertEqual(old.plateOctaves, 3, "a file from before keeps today's spread")
+        XCTAssertEqual(try SetupStorage.decode(Data("{}".utf8)).plateStrings, 10)
+    }
+
+    func testTheOldRangeBecomesTheSameStrings() throws {
+        XCTAssertEqual(try SetupStorage.decode(Data(#"{"plateOctaves": 4}"#.utf8)).plateStrings, 13)
+        XCTAssertEqual(try SetupStorage.decode(Data(#"{"plateOctaves": 5}"#.utf8)).plateStrings, 16)
     }
 
     func testTheKeyIsSaved() throws {
