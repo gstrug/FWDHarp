@@ -27,6 +27,9 @@ final class HarpPlayer: ObservableObject {
     /// Bumped each time a note is plucked, so a release timed for an earlier pluck of
     /// the same note does not cut the new one short.
     private var plucks: [UInt8: Int] = [:]
+    /// While Held: how many fingers hold each note. The same note can be on two
+    /// strings (the plate orders repeat notes), so it is released when the last lets go.
+    private var held: [UInt8: Int] = [:]
     private let strummer: AutoStrummer
     private var tapper = TapTempo()
     private var cancellables = Set<AnyCancellable>()
@@ -176,10 +179,12 @@ final class HarpPlayer: ObservableObject {
 
     // MARK: Plate
 
-    /// Play one string, `loudness` 0 (left edge) to 1 (right edge).
-    func pluck(string: Int, loudness: Double) {
+    /// Play one string, `loudness` 0 (left edge) to 1 (right edge). Returns the note
+    /// played, which the finger hands back to `lift` when it leaves the string.
+    @discardableResult
+    func pluck(string: Int, loudness: Double) -> UInt8? {
         let notes = plateNotes
-        guard notes.indices.contains(string) else { return }
+        guard notes.indices.contains(string) else { return nil }
         let note = UInt8(notes[string])
         // Always released first, even if the plate did not start it: auto-strum may
         // be sounding the same note on the same instrument, and a second note-on with
@@ -188,6 +193,7 @@ final class HarpPlayer: ObservableObject {
         store.noteOn(note, velocity: StrumPlate.velocity(atWidth: loudness))
         ringing.insert(note)
         plucks[note, default: 0] += 1
+        if plateRing == .whileHeld { held[note, default: 0] += 1 }
         if let seconds = plateRing.seconds {
             let pluck = plucks[note]
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
@@ -196,11 +202,28 @@ final class HarpPlayer: ObservableObject {
                 ringing.remove(note)
             }
         }
+        return note
+    }
+
+    /// A finger left the string where it started `note` (moved off it or lifted). With
+    /// While Held, the note is released, unless another finger still holds it. Given
+    /// the note itself, not the string: a 7th or sus added meanwhile changes what the
+    /// string plays, and the note that is sounding is the one to release.
+    func lift(note: UInt8) {
+        guard plateRing == .whileHeld else { return }
+        guard let count = held[note] else { return }
+        if count > 1 { held[note] = count - 1; return }
+        held.removeValue(forKey: note)
+        if ringing.contains(note) {
+            store.noteOff(note)
+            ringing.remove(note)
+        }
     }
 
     var plateRing: PlateRing { store.setup.plateRing }
 
     func setPlateRing(_ ring: PlateRing) {
+        stopRinging()
         store.setPlateRing(ring)
     }
 
@@ -214,6 +237,7 @@ final class HarpPlayer: ObservableObject {
     func panic() {
         strummer.stop()
         ringing.removeAll()
+        held.removeAll()
         touchedStrings = []
         store.engine.panic()
     }
@@ -221,6 +245,7 @@ final class HarpPlayer: ObservableObject {
     func stopRinging() {
         for note in ringing { store.noteOff(note) }
         ringing.removeAll()
+        held.removeAll()
     }
 
     /// The harp is leaving the screen: lift every pad and silence the plate.

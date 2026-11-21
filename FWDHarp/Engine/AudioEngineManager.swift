@@ -1476,20 +1476,18 @@ nonisolated final class AudioEngineManager: @unchecked Sendable {
     func panic() {
         withLock {
             for (id, unit) in auv3Units where settledInstruments.contains(id) {
-                // On every channel, for instruments that play notes on channels of their
-                // own (MPE mode, as GeoShred can be set to), and with the sustain pedal
-                // released, which otherwise keeps "released" notes sounding.
+                // All Sound Off (a hard cut) on channel 1 only, where FWD Harp plays.
+                // Sending it with everything else on all 16 channels, and every note-off
+                // twice, was over 300 events at once and glitched the audio (Graham,
+                // 2026-11-21).
+                sendMIDI(to: unit, 0xB0, 120, 0)
+                // Sustain off and All Notes Off on every channel, for an instrument that
+                // plays notes on channels of their own (MPE mode, as GeoShred can be).
                 for channel: UInt8 in 0...15 {
-                    sendMIDI(to: unit, 0xB0 | channel, 64, 0)    // Sustain off
-                    sendMIDI(to: unit, 0xB0 | channel, 120, 0)   // All Sound Off
-                    sendMIDI(to: unit, 0xB0 | channel, 123, 0)   // All Notes Off
+                    sendMIDI(to: unit, 0xB0 | channel, 64, 0)
+                    sendMIDI(to: unit, 0xB0 | channel, 123, 0)
                 }
-                // Both spellings of a note-off: a note-on at velocity 0 is the one some
-                // instruments honour.
-                for n in 0...127 {
-                    sendMIDI(to: unit, 0x80, UInt8(n), 64)
-                    sendMIDI(to: unit, 0x90, UInt8(n), 0)
-                }
+                for n in 0...127 { sendMIDI(to: unit, 0x80, UInt8(n), 0) }
             }
             for (_, sampler) in samplers {
                 for n in 0...127 { sampler.stopNote(UInt8(n), onChannel: 0) }

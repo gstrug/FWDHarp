@@ -66,28 +66,37 @@ struct StrumPlateView: View {
     }
 }
 
-/// The string each finger is on.
+/// The string each finger is on, and the note it started there.
 private final class PlateTouches {
     struct Place { let string: Int; let loudness: Double }
     private var stringForTouch: [ObjectIdentifier: Int] = [:]
+    private var noteForTouch: [ObjectIdentifier: UInt8] = [:]
 
     func begin(_ id: ObjectIdentifier, at place: Place, player: HarpPlayer) {
         stringForTouch[id] = place.string
-        player.pluck(string: place.string, loudness: place.loudness)
+        noteForTouch[id] = player.pluck(string: place.string, loudness: place.loudness)
         light(player)
     }
 
     func move(_ id: ObjectIdentifier, to place: Place, player: HarpPlayer) {
         guard let before = stringForTouch[id], before != place.string else { return }
-        for string in StrumPlate.strings(crossedFrom: before, to: place.string) {
-            player.pluck(string: string, loudness: place.loudness)
+        // The new string sounds before the old one is let go, so a note on both
+        // strings is never cut. Strings swept past in between are let go at once.
+        let crossed = StrumPlate.strings(crossedFrom: before, to: place.string)
+        var landed: UInt8?
+        for string in crossed {
+            let note = player.pluck(string: string, loudness: place.loudness)
+            if string == place.string { landed = note } else if let note { player.lift(note: note) }
         }
+        if let previous = noteForTouch[id] { player.lift(note: previous) }
         stringForTouch[id] = place.string
+        noteForTouch[id] = landed
         light(player)
     }
 
     func end(_ id: ObjectIdentifier, player: HarpPlayer) {
         stringForTouch.removeValue(forKey: id)
+        if let note = noteForTouch.removeValue(forKey: id) { player.lift(note: note) }
         light(player)
     }
 

@@ -61,10 +61,11 @@ final class PlateRingTests: XCTestCase {
         XCTAssertEqual(PlateRing.short.seconds, 0.4)
         XCTAssertEqual(PlateRing.long.seconds, 3)
         XCTAssertNil(PlateRing.untilChordChange.seconds, "the old behaviour, kept as a choice")
+        XCTAssertNil(PlateRing.whileHeld.seconds, "released by the finger, like a keyboard")
     }
 
-    func testRingIsSavedAndStartsLong() throws {
-        XCTAssertEqual(try SetupStorage.decode(Data("{}".utf8)).plateRing, .long)
+    func testRingIsSavedAndStartsWhileHeld() throws {
+        XCTAssertEqual(try SetupStorage.decode(Data("{}".utf8)).plateRing, .whileHeld)
         var setup = HarpSetup()
         setup.plateRing = .short
         XCTAssertEqual(try SetupStorage.decode(JSONEncoder().encode(setup)).plateRing, .short)

@@ -211,11 +211,16 @@ nonisolated enum PlateScale: String, CaseIterable, Codable {
 /// a synth, a note that rang until the next chord seemed to hang, since a synth keeps
 /// sounding until it is released; a harp fades by itself). A note played again before
 /// its time is struck afresh and timed from then.
+///
+/// While Held works like a keyboard (and like the instrument window's own keys): the
+/// note sounds while the finger is on its string, and is released as the finger moves
+/// off it or lifts, so the instrument's own release decides the tail.
 nonisolated enum PlateRing: String, CaseIterable, Codable {
-    case short, medium, long, untilChordChange
+    case whileHeld, short, medium, long, untilChordChange
 
     var title: String {
         switch self {
+        case .whileHeld: return "While Held"
         case .short: return "Short"
         case .medium: return "Medium"
         case .long: return "Long"
@@ -223,9 +228,11 @@ nonisolated enum PlateRing: String, CaseIterable, Codable {
         }
     }
 
-    /// Seconds before the note is released; nil to ring until the chord changes.
+    /// Seconds before the note is released; nil for While Held (released by the finger)
+    /// and Until Chord.
     var seconds: Double? {
         switch self {
+        case .whileHeld: return nil
         case .short: return 0.4
         case .medium: return 1.2
         case .long: return 3
