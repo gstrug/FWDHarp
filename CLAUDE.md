@@ -221,4 +221,10 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   re-times it (HarpPlayer.plucks). PANIC also sends CC64/120/123 on all 16 channels and
   note-offs in both spellings. Master strip: Color.clear, not EmptyView (no size).
   Velocity path checked in code (30–127 left→right); Graham to confirm on built-in.
+- 2026-11-21: PlateRing.whileHeld (new default): note-off when the finger leaves the
+  string or lifts, like the editor's audition keys (which Graham found fine where the
+  plate's 3 s timer sounded hung). pluck returns the note; PlateTouches lifts that note
+  (not the string's current note); HarpPlayer.held counts fingers per note. PANIC toned
+  down (glitched at 300+ events): CC120 on ch 1 only, CC64 + CC123 on 16 ch, one
+  note-off per note.
 
