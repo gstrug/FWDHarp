@@ -169,4 +169,11 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   F C G / Dm Am Em, and a thumb row of smaller modifier pads 7th, sus2, sus4 below-right
   of C. sus replaces the 3rd (minor chords too); with 7th → 7sus2/7sus4; last sus
   pressed wins. Modifiers stop nothing ringing.
+- 2026-11-21: step 3. Plate RANGE 3/4/5 octaves (10/13/16 strings in the same height;
+  3 is the minimum — Graham likes that spread), OCT ±2 (lowest note 48 + tonic + 12 ×
+  shift), both saved in HarpSetup. HOLD (top bar, not saved): PadSelection.latched keeps
+  the last chord pad after lifting; modifiers still apply live; the kept pad stays lit.
+  Next: auto-strum (four patterns) and tempo.
+- Delete permission on the folder is per connection: after the Mac reconnects (e.g.
+  overnight) ask for it again BEFORE the first git command, or git leaves .lock files.
 
