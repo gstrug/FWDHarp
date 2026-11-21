@@ -1,17 +1,18 @@
 import SwiftUI
 import UIKit
 
-/// The instrument's AUv3 effect chain: instrument → effects, in signal order, → output.
-/// Copied from FWD Sequencer's TrackEffectsView on 2026-11-20, for FWD Harp's one part.
+/// A part's AUv3 effect chain: instrument → effects, in signal order, → its channel.
+/// Copied from FWD Sequencer's TrackEffectsView on 2026-11-20.
 struct EffectsView: View {
     @ObservedObject var store: InstrumentStore
+    let part: HarpPart
     @Environment(\.dismiss) private var dismiss
     @State private var showPicker = false
     @State private var editingIndex: Int?
     /// The slot whose effect is being swapped for another, if any.
     @State private var replacingIndex: Int?
 
-    private var slots: [PluginSlot] { store.effects }
+    private var slots: [PluginSlot] { store.effects(for: part) }
 
     var body: some View {
         NavigationStack {
@@ -21,8 +22,8 @@ struct EffectsView: View {
                 if !slots.isEmpty {
                     Section {
                         Toggle("Effects On", isOn: Binding(
-                            get: { !store.setup.effectsBypassed },
-                            set: { store.setEffectsChainBypassed(!$0) }
+                            get: { !store.effectsBypassed(for: part) },
+                            set: { store.setEffectsChainBypassed(!$0, for: part) }
                         ))
                         .tint(.green)
                     } footer: {
@@ -43,13 +44,13 @@ struct EffectsView: View {
                                 .deleteDisabled(true)
                         }
                         .onMove { source, destination in
-                            store.moveEffects(from: source, to: destination)
+                            store.moveEffects(from: source, to: destination, for: part)
                         }
                     }
                 } header: {
                     Text("Chain")
                 } footer: {
-                    Text("Effects process the instrument, top to bottom. Their own settings "
+                    Text("Effects process the \(part.title.lowercased()) part's instrument, top to bottom. Their own settings "
                          + "are saved."
                          + (slots.count > 1 ? " Drag the handles to reorder them." : ""))
                 }
@@ -71,7 +72,7 @@ struct EffectsView: View {
             // handles are simply there (in FWD an Edit button hid them, and nobody
             // thought to press it).
             .environment(\.editMode, .constant(slots.count > 1 ? .active : .inactive))
-            .navigationTitle("Effects")
+            .navigationTitle("\(part.title) Effects")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -80,7 +81,7 @@ struct EffectsView: View {
             }
             .sheet(isPresented: $showPicker) {
                 EffectPickerView { info in
-                    store.addEffect(info)
+                    store.addEffect(info, to: part)
                     showPicker = false
                 }
             }
@@ -89,7 +90,7 @@ struct EffectsView: View {
                 set: { replacingIndex = $0?.index }
             )) { target in
                 EffectPickerView { info in
-                    store.replaceEffect(at: target.index, with: info)
+                    store.replaceEffect(at: target.index, with: info, for: part)
                     replacingIndex = nil
                 }
             }
@@ -100,12 +101,12 @@ struct EffectsView: View {
                 set: { editingIndex = $0?.index }
             )) { target in
                 PluginEditorView(
-                    trackID: InstrumentStore.partID,
+                    trackID: InstrumentStore.trackID(for: part),
                     trackName: slots[safe: target.index]?.pluginInfo.name ?? "Effect",
                     effectIndex: target.index,
                     // Capture on close, exactly as the instrument's editor does, so a
                     // tweak survives without thinking to save anything.
-                    onCommitState: { store.captureEffectState(at: target.index) }
+                    onCommitState: { store.captureEffectState(at: target.index, for: part) }
                 )
             }
         }
@@ -130,7 +131,7 @@ struct EffectsView: View {
 
                 Toggle("Bypass", isOn: Binding(
                     get: { slot.bypassed },
-                    set: { store.setEffectBypassed($0, at: index) }
+                    set: { store.setEffectBypassed($0, at: index, for: part) }
                 ))
                 .toggleStyle(.button).controlSize(.small).tint(.orange)
 
@@ -144,7 +145,7 @@ struct EffectsView: View {
                 .buttonStyle(.bordered).controlSize(.small)
 
                 Button(role: .destructive) {
-                    store.removeEffect(at: index)
+                    store.removeEffect(at: index, from: part)
                 } label: {
                     Label("Remove", systemImage: "trash")
                 }
@@ -163,14 +164,15 @@ struct EffectsView: View {
 /// well, so the chain would toggle every time the list was opened.
 struct EffectsToggleButton: View {
     @ObservedObject var store: InstrumentStore
+    let part: HarpPart
     @State private var showEffects = false
 
-    private var slots: [PluginSlot] { store.effects }
+    private var slots: [PluginSlot] { store.effects(for: part) }
 
     private enum Status { case none, active, allBypassed }
     private var status: Status {
         if slots.isEmpty { return .none }
-        if store.setup.effectsBypassed || slots.allSatisfy(\.bypassed) { return .allBypassed }
+        if store.effectsBypassed(for: part) || slots.allSatisfy(\.bypassed) { return .allBypassed }
         return .active
     }
 
@@ -187,7 +189,7 @@ struct EffectsToggleButton: View {
         case .none: return "No effects"
         case .active: return "\(slots.count) loaded, \(slots.filter { !$0.bypassed }.count) active"
         case .allBypassed:
-            return store.setup.effectsBypassed ? "\(slots.count) loaded, switched off"
+            return store.effectsBypassed(for: part) ? "\(slots.count) loaded, switched off"
                                                : "\(slots.count) loaded, all bypassed"
         }
     }
@@ -200,10 +202,10 @@ struct EffectsToggleButton: View {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 showEffects = true
             }
-            .sheet(isPresented: $showEffects) { EffectsView(store: store) }
+            .sheet(isPresented: $showEffects) { EffectsView(store: store, part: part) }
             .accessibilityElement()
             .accessibilityAddTraits(.isButton)
-            .accessibilityLabel("Effects")
+            .accessibilityLabel("\(part.title) effects")
             .accessibilityValue(accessibilityValue)
             .accessibilityHint(slots.isEmpty ? "Opens the effects list"
                                : "Switches all effects on or off. Use the Edit Effects action to change them.")
@@ -213,7 +215,7 @@ struct EffectsToggleButton: View {
 
     private func tap() {
         if slots.isEmpty { showEffects = true }
-        else { store.setEffectsChainBypassed(!store.setup.effectsBypassed) }
+        else { store.setEffectsChainBypassed(!store.effectsBypassed(for: part), for: part) }
     }
 }
 

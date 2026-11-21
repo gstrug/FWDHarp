@@ -1,16 +1,13 @@
 import SwiftUI
 
 /// The harp: chord pads under the left hand, the strum plate on the right, and the
-/// instrument, key and effects along the top. The instrument, its sound, the effects
-/// and the key are remembered between launches.
+/// plate's instrument, the key and the mixer along the top. Everything set is
+/// remembered between launches, except HOLD and AUTO, which start off.
 struct ContentView: View {
     @StateObject private var player = HarpPlayer()
     private var store: InstrumentStore { player.store }
-    @State private var showPicker = false
-    @State private var showBuiltInSounds = false
-    @State private var showPluginEditor = false
+    @State private var showMixer = false
     @State private var showCredits = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -33,54 +30,10 @@ struct ContentView: View {
             .padding(20)
         }
         .background(Color(white: 0.08).ignoresSafeArea())
-        .sheet(isPresented: $showPicker) {
-            PluginPickerView(
-                selectedPlugin: Binding(get: { store.plugin }, set: { store.choose($0) }),
-                builtInSound: store.builtInSound
-            )
-        }
-        .sheet(isPresented: $showBuiltInSounds) {
-            BuiltInSoundSheet(title: "Built-in Sound", current: store.builtInSound) { sound in
-                store.setBuiltInSound(sound)
-                // Play the new sound at once, so it can be heard.
-                store.noteOn(60)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { store.noteOff(60) }
-            }
-        }
-        // Full screen, as in FWD Sequencer: a plugin's own window needs the room, and in
-        // a sheet it came up at a much smaller scale (Graham, 2026-11-20).
-        .fullScreenCover(isPresented: $showPluginEditor) {
-            PluginEditorView(trackID: InstrumentStore.partID,
-                             trackName: store.instrumentName,
-                             onCommitState: { store.captureInstrumentState() },
-                             onReload: { store.reload() })
-        }
+        .sheet(isPresented: $showMixer) { MixerView(player: player) }
         .sheet(isPresented: $showCredits) { CreditsView() }
-        // BLOCKING while the instrument loads: interrupting a fragile AUv3 while it
-        // instantiates crashes it (FWD lesson 1). Do not add .allowsHitTesting(false).
-        .overlay {
-            if store.isLoading {
-                ZStack {
-                    Color.black.opacity(0.55).ignoresSafeArea()
-                    VStack(spacing: 14) {
-                        ProgressView().controlSize(.large).tint(.white)
-                        Text("Loading instruments…")
-                            .font(.title3.bold()).foregroundStyle(.white)
-                        if let name = store.loadingName {
-                            Text(name).font(.callout).foregroundStyle(.white)
-                        }
-                        Text("Some plugins take a while. The screen unlocks when they're ready.")
-                            .font(.footnote).foregroundStyle(.white.opacity(0.8))
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(36)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
-                }
-                .contentShape(Rectangle())
-                .transition(.opacity)
-            }
-        }
-        // A safe moment to keep the instrument's sound and save (FWD lesson 3).
+        .loadingOverlay(store)
+        // A safe moment to keep the instruments' sounds and save (FWD lesson 3).
         .onChange(of: scenePhase) { phase in
             if phase == .background {
                 player.setAutoStrumming(false)
@@ -88,15 +41,7 @@ struct ContentView: View {
                 store.captureAndSave()
             }
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: store.isLoading)
-        .alert("FWD Harp", isPresented: Binding(
-            get: { store.notice != nil },
-            set: { if !$0 { store.notice = nil } }
-        )) {
-            Button("OK") { store.notice = nil }
-        } message: {
-            Text(store.notice ?? "")
-        }
+        .storeNotices(store)
     }
 
     private var topBar: some View {
@@ -113,29 +58,10 @@ struct ContentView: View {
             ScaleMenu(player: player)
             Spacer()
             keyMenu
-            Button { showPicker = true } label: {
-                HStack(spacing: 8) {
-                    if let plugin = store.plugin {
-                        PluginIcon(plugin: plugin, size: 24)
-                    } else {
-                        Image(systemName: "pianokeys")
-                    }
-                    Text(store.instrumentName).lineLimit(1)
-                }
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(Color(white: 0.87))
-                .studioWindow()
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Instrument: \(store.instrumentName)")
-            .accessibilityHint("Choose another instrument")
-
-            StudioTapButton(title: "EDIT") {
-                if store.plugin == nil { showBuiltInSounds = true } else { showPluginEditor = true }
-            }
-
-            EffectsToggleButton(store: store)
-                .accessibilityLabel("Edit Instrument")
+            PartInstrumentButtons(store: store, part: .plate)
+            EffectsToggleButton(store: store, part: .plate)
+            StudioTapButton(title: "MIX") { showMixer = true }
+                .accessibilityLabel("Mixer")
 
             Button { showCredits = true } label: {
                 Image(systemName: "info.circle")

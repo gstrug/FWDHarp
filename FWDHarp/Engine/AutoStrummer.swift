@@ -13,7 +13,8 @@ import Foundation
 /// (with Hold off) stops it.
 nonisolated final class AutoStrummer: @unchecked Sendable {
     private let engine: AudioEngineManager
-    private let partID: UUID
+    /// The track auto-strum's notes go to. Guarded by `lock`.
+    private var partID: UUID
     private let queue = DispatchQueue(label: "com.fwdharp.autostrum", qos: .userInteractive)
     private let lock = NSLock()
 
@@ -51,6 +52,16 @@ nonisolated final class AutoStrummer: @unchecked Sendable {
             } else if !running {
                 startLocked()
             }
+        }
+    }
+
+    /// Send the notes to another track: auto-strum given its own instrument, or sent
+    /// back through the plate's. What is sounding stops first, on the old track.
+    func setTarget(_ trackID: UUID) {
+        locked {
+            guard trackID != partID else { return }
+            releaseLocked()
+            partID = trackID
         }
     }
 

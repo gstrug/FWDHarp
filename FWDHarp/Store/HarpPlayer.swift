@@ -32,7 +32,7 @@ final class HarpPlayer: ObservableObject {
     /// @StateObject, created exactly once, and the store with it.
     init(store: InstrumentStore = InstrumentStore()) {
         self.store = store
-        strummer = AutoStrummer(engine: store.engine, partID: InstrumentStore.partID)
+        strummer = AutoStrummer(engine: store.engine, partID: store.soundingTrackID(for: .auto))
         strummer.setPattern(store.setup.autoStrumPattern)
         strummer.setTempo(store.setup.tempo)
         // Redraw when the key (in the store's setup) changes.
@@ -139,6 +139,12 @@ final class HarpPlayer: ObservableObject {
 
     var autoStrumPattern: AutoStrumPattern { store.setup.autoStrumPattern }
     var tempo: Double { store.setup.tempo }
+
+    /// Give auto-strum its own instrument, or play it through the plate's.
+    func setAutoHasOwnSound(_ own: Bool) {
+        store.setAutoHasOwnSound(own)
+        strummer.setTarget(store.soundingTrackID(for: .auto))
+    }
 
     func setAutoStrumming(_ on: Bool) {
         isAutoStrumming = on

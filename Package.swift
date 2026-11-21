@@ -25,6 +25,7 @@ let package = Package(
                 "Views",
                 "Store/InstrumentStore.swift",
                 "Store/HarpPlayer.swift",
+                "Store/LevelMeters.swift",
                 // App bundle resources, loaded through Bundle.main; the core has no use
                 // for them and SwiftPM warns if they are neither declared nor excluded.
                 "Resources",
