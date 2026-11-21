@@ -239,4 +239,12 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   part's channel; tracks sent notes, releases them on off/channel change/PANIC).
   AutoStrummer now takes the router. MIDI chip (lit when on) → `Views/MIDIOutView.swift`.
   Next: tempo sync (MIDI clock in, Link).
+- 2026-11-21: build 2 bumped and pushed; app icon added (FWD's icon with straight
+  lines; `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` was missing) — committed, push
+  waiting for Graham. Then: own sound per part (MIDIOutSettings plate/autoInternalSound;
+  old `internalSound` read for both); Pentatonic/Blues follow the held chord (major or
+  minor form by its 3rd; sus4 minor; no chord = key, major) via
+  PlateScale.pitchClasses(in:chord:); auto-strum arpeggios coloured by the scale
+  (AutoStrum.colouredFigure: one passing note just below each next chord note); STRINGS
+  (10/13/16/20/24, HarpSetup.plateStrings; old plateOctaves read as 3n+1) replaces RANGE.
 
