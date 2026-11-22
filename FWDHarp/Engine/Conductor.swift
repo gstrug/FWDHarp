@@ -82,6 +82,20 @@ nonisolated final class Conductor: @unchecked Sendable {
     private var lastTick = -1
     private var autoOriginTick = 0
 
+    // An incoming MIDI clock (Graham, 2026-11-22): it sets the tempo and the beat, and
+    // its Start and Stop can start and stop the drums.
+    private var followsClock = false
+    private var clockTransport = true
+    private var clockTempo = MIDIClockTempo()
+    private var lastPulseTime: Double = -1
+    /// Pulses since the clock's Start (or since following began).
+    private var pulseIndex = 0
+    /// After Start, its first pulse is due: the clock's own timing waits for it.
+    private var awaitingPulseUntil: Double = -1
+    private var reportedClockTempo: Double?
+    /// The incoming clock's tempo, on the main thread, when it changes.
+    var onClockTempo: ((Double?) -> Void)?
+
     init(router: NoteRouter) {
         self.router = router
     }
@@ -107,8 +121,9 @@ nonisolated final class Conductor: @unchecked Sendable {
                 } else if pattern == .singleSweep {
                     if newPad { sweepLocked() }
                 } else if !hadChord, clockRunning, !rhythmOn {
-                    // Auto-strum alone, picking up again: its pattern starts now.
-                    autoOriginTick = lastTick + 1
+                    // Auto-strum alone, picking up again: its pattern starts now (on
+                    // the incoming clock's next eighth or beat, when following one).
+                    autoOriginTick = alignedTickLocked(step: autoStepTicks)
                 }
             }
             ensureClockLocked()
@@ -125,7 +140,7 @@ nonisolated final class Conductor: @unchecked Sendable {
                 sweepLocked()
             } else if !rhythmOn {
                 releaseAutoLocked()
-                autoOriginTick = lastTick + 1
+                autoOriginTick = alignedTickLocked(step: autoStepTicks)
             }
         }
     }
@@ -136,7 +151,7 @@ nonisolated final class Conductor: @unchecked Sendable {
             if !on {
                 releaseAutoLocked()
             } else if chord != nil {
-                if pattern == .singleSweep { sweepLocked() } else { autoOriginTick = lastTick + 1 }
+                if pattern == .singleSweep { sweepLocked() } else { autoOriginTick = alignedTickLocked(step: autoStepTicks) }
             }
             ensureClockLocked()
         }
@@ -147,7 +162,7 @@ nonisolated final class Conductor: @unchecked Sendable {
             guard newPattern != pattern else { return }
             pattern = newPattern
             releaseAutoLocked()
-            autoOriginTick = lastTick + 1
+            autoOriginTick = alignedTickLocked(step: autoStepTicks)
             ensureClockLocked()
         }
     }
@@ -155,6 +170,65 @@ nonisolated final class Conductor: @unchecked Sendable {
     /// The tick already waiting keeps its time; every tick after it uses the new tempo.
     func setTempo(_ newTempo: Double) {
         locked { tempo = newTempo }
+    }
+
+    // MARK: - Following an incoming MIDI clock
+
+    /// Follow a MIDI clock: its tempo and beat. `transport`: its Start and Stop start
+    /// and stop the drums too.
+    func setFollowsClock(_ on: Bool, transport: Bool) {
+        locked {
+            clockTransport = transport
+            guard on != followsClock else { return }
+            followsClock = on
+            clockTempo.reset()
+            lastPulseTime = -1
+            pulseIndex = 0
+            if !on { reportClockTempoLocked(nil) }
+        }
+    }
+
+    /// 0xF8, on CoreMIDI's thread. Every second pulse is one of the music's ticks.
+    func clockPulse(at time: Double) {
+        locked {
+            guard followsClock else { return }
+            lastPulseTime = Self.now
+            awaitingPulseUntil = -1
+            if let bpm = clockTempo.pulse(at: time) {
+                tempo = bpm
+                reportClockTempoLocked(bpm)
+            }
+            let plays = pulseIndex % 2 == 0
+            pulseIndex += 1
+            if plays, clockRunning { advanceLocked() }
+        }
+    }
+
+    /// 0xFA Start or 0xFB Continue: the next pulse is the first beat. With transport
+    /// following on, the drums start with it.
+    func clockStart() {
+        locked {
+            guard followsClock else { return }
+            pulseIndex = 0
+            awaitingPulseUntil = Self.now + 0.3
+            if clockTransport, !rhythmOn { startRhythmLocked() }
+        }
+    }
+
+    /// 0xFC Stop: with transport following on, the drums stop.
+    func clockStop() {
+        locked {
+            guard followsClock, clockTransport, rhythmOn else { return }
+            stopRhythmLocked()
+            ensureClockLocked()
+        }
+    }
+
+    private func reportClockTempoLocked(_ bpm: Double?) {
+        if let bpm, let last = reportedClockTempo, abs(bpm - last) < 0.5 { return }
+        guard bpm != nil || reportedClockTempo != nil else { return }
+        reportedClockTempo = bpm
+        DispatchQueue.main.async { [weak self] in self?.onClockTempo?(bpm) }
     }
 
     // MARK: - The rhythm section
@@ -195,7 +269,11 @@ nonisolated final class Conductor: @unchecked Sendable {
     /// START, or the first pad or strum with SYNC: on the next tick, with the intro
     /// first if it is on.
     func startRhythm() {
-        locked {
+        locked { startRhythmLocked() }
+    }
+
+    private func startRhythmLocked() {
+        do {
             guard !rhythmOn else { return }
             rhythmOn = true
             introActive = introEnabled
@@ -203,7 +281,8 @@ nonisolated final class Conductor: @unchecked Sendable {
             crashNext = false
             if let pendingStyle { style = pendingStyle; self.pendingStyle = nil }
             if let pendingVariation { variation = pendingVariation; self.pendingVariation = nil }
-            rhythmStartTick = clockRunning ? lastTick + 1 : 0
+            // Following a clock: on its next beat.
+            rhythmStartTick = clockRunning ? alignedTickLocked(step: Self.ticksPerBeat) : 0
             ensureClockLocked()
             report(bar: 0, beat: 0)
         }
@@ -279,9 +358,10 @@ nonisolated final class Conductor: @unchecked Sendable {
             clockRunning = true
             clockGeneration &+= 1
             lastTick = -1
-            autoOriginTick = 0
-            if rhythmOn { rhythmStartTick = 0 }
-            schedule(tick: 0, at: .now())
+            // From the start, or, following a clock, from its next eighth or beat.
+            autoOriginTick = alignedTickLocked(step: autoStepTicks)
+            if rhythmOn { rhythmStartTick = alignedTickLocked(step: Self.ticksPerBeat) }
+            schedule(at: .now())
         } else if !needsClock, clockRunning {
             stopClockLocked()
         }
@@ -303,26 +383,63 @@ nonisolated final class Conductor: @unchecked Sendable {
         bassSounding = nil
     }
 
-    private func schedule(tick: Int, at due: DispatchTime) {
+    private func schedule(at due: DispatchTime) {
         let token = clockGeneration
         queue.asyncAfter(deadline: due) { [weak self] in
-            self?.fire(tick: tick, due: due, token: token)
+            self?.fire(due: due, token: token)
         }
     }
 
-    private func fire(tick: Int, due: DispatchTime, token: UInt64) {
+    /// The clock's own tick. While an incoming MIDI clock is driving, it only keeps
+    /// time in reserve (it takes over if the clock stops arriving).
+    private func fire(due: DispatchTime, token: UInt64) {
         locked {
             guard token == clockGeneration, clockRunning else { return }
-            lastTick = tick
-            releaseDueLocked(tick)
-            if rhythmOn { playRhythmLocked(tick) }
-            playAutoLocked(tick)
+            if !externalDrivingLocked { advanceLocked() }
             // From when this tick was due, at the tempo as it is now.
             let bpm = min(max(tempo, AutoStrum.tempoRange.lowerBound), AutoStrum.tempoRange.upperBound)
             let interval = 60 / bpm / Double(Self.ticksPerBeat)
-            schedule(tick: tick + 1, at: due + .nanoseconds(Int(interval * 1e9)))
+            schedule(at: due + .nanoseconds(Int(interval * 1e9)))
         }
     }
+
+    /// One tick of the music, from the clock's own timing or from an incoming MIDI clock.
+    private func advanceLocked() {
+        let tick = lastTick + 1
+        lastTick = tick
+        releaseDueLocked(tick)
+        if rhythmOn { playRhythmLocked(tick) }
+        playAutoLocked(tick)
+    }
+
+    // MARK: - Following an incoming MIDI clock (caller holds `lock`)
+
+    /// Now, on the same clock as CoreMIDI's timestamps.
+    private static var now: Double { Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000 }
+
+    /// An incoming clock is setting the beat: following is on, and a pulse has arrived
+    /// lately (or Start has just come and its first pulse is on the way).
+    private var externalDrivingLocked: Bool {
+        guard followsClock else { return false }
+        let now = Self.now
+        return now - lastPulseTime < 0.3 || now < awaitingPulseUntil
+    }
+
+    /// The next tick to play on the incoming clock's grid: clock ticks are counted from
+    /// its Start, two pulses (of 24 a beat) each.
+    private var nextClockTick: Int { (pulseIndex + 1) / 2 }
+
+    /// The first tick from now that falls on the incoming clock's grid of `step` ticks
+    /// (12 a beat, 6 an eighth), so what starts now starts in time with the other app.
+    /// Not following: the next tick.
+    private func alignedTickLocked(step: Int) -> Int {
+        guard externalDrivingLocked, step > 0 else { return lastTick + 1 }
+        let wait = (step - nextClockTick % step) % step
+        return lastTick + 1 + wait
+    }
+
+    /// Auto-strum's step on the grid: a beat for block chords, an eighth otherwise.
+    private var autoStepTicks: Int { pattern.stepsPerBeat == 1 ? Self.ticksPerBeat : Self.ticksPerBeat / 2 }
 
     private func releaseDueLocked(_ tick: Int) {
         if let bass = bassSounding, bass.endTick <= tick { releaseBassLocked() }

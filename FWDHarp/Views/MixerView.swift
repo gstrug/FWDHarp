@@ -121,16 +121,20 @@ private struct PartStrip: View {
                                accessibilityLabel: "\(part.title) volume") {
                     PartMeter(levels: store.levels, trackID: InstrumentStore.trackID(for: part))
                 }
+                .midiLearnable(.partVolume(part))
                 Text("Vol").font(.caption2).foregroundStyle(.secondary)
                 EffectsToggleButton(store: store, part: part)
+                    .midiLearnable(.partEffects(part))
                 StudioKnob(value: Binding(get: { Double(mix.pan) }, set: { store.setPan(Float($0), for: part) }),
                            range: -1...1, defaultValue: 0, bipolar: true, size: StripSize.knob,
                            label: "Pan \(panLabel)",
                            format: { _ in panLabel })
+                    .midiLearnable(.partPan(part))
                 StudioToggleChip(title: "M",
                                  isOn: Binding(get: { mix.muted }, set: { store.setMuted($0, for: part) }),
                                  tint: .orange,
                                  accessibilityLabel: "Mute \(part.title)")
+                    .midiLearnable(.partMute(part))
             }
             // Auto-strum without a sound of its own plays on the plate's channel.
             .disabled(!hasOwn)
@@ -172,6 +176,7 @@ private struct MasterStrip: View {
                            accessibilityLabel: "Master volume") {
                 SegmentedMeter(level: levels.masterLevel, segments: 18)
             }
+            .midiLearnable(.masterVolume)
             Text("Vol").font(.caption2).foregroundStyle(.secondary)
         }
         .frame(width: StripSize.width)

@@ -28,6 +28,11 @@ final class HarpPlayer: ObservableObject {
     /// first strum (auto-strum off), rather than at START. Not saved.
     @Published private(set) var isRhythmArmed = false
 
+    /// Following an incoming MIDI clock (MIDI settings): it sets the tempo and the beat.
+    @Published private(set) var isFollowingClock = false
+    /// The incoming clock's tempo, once a beat of it has arrived.
+    @Published private(set) var clockTempo: Double?
+
     /// Notes sounding from the plate, so they can be stopped or struck afresh.
     private var ringing: Set<UInt8> = []
     /// Bumped each time a note is plucked, so a release timed for an earlier pluck of
@@ -58,6 +63,7 @@ final class HarpPlayer: ObservableObject {
             // with the drums (Graham, 2026-11-22), after STOP or an outro.
             if stopped, selection.isHolding { stopKeptChord() }
         }
+        strummer.onClockTempo = { [weak self] bpm in self?.clockTempo = bpm }
         // Redraw when the key (in the store's setup) changes.
         store.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -198,6 +204,17 @@ final class HarpPlayer: ObservableObject {
         strummer.setTempo(store.setup.tempo)
     }
 
+    /// The clock, for MIDI in to drive: its pulses arrive on CoreMIDI's thread.
+    var conductor: Conductor { strummer }
+
+    /// Follow an incoming MIDI clock, or go back to the BPM set here.
+    func setFollowsClock(_ on: Bool, transport: Bool) {
+        strummer.setFollowsClock(on, transport: transport)
+        if !on, isFollowingClock { strummer.setTempo(tempo) }
+        isFollowingClock = on
+        if !on { clockTempo = nil }
+    }
+
     func tapTempo() {
         if let bpm = tapper.tap(at: ProcessInfo.processInfo.systemUptime) { setTempo(bpm) }
     }
@@ -208,6 +225,13 @@ final class HarpPlayer: ObservableObject {
     var rhythmVariation: RhythmVariation { store.setup.rhythmVariation }
     /// INTRO lit: the next start plays the style's intro. It goes off once played.
     var rhythmIntro: Bool { rhythm.introArmed }
+
+    /// The previous or next style in the menu's order, round the ends.
+    func stepRhythmStyle(by step: Int) {
+        let all = RhythmStyle.allCases
+        guard let index = all.firstIndex(of: rhythmStyle) else { return }
+        setRhythmStyle(all[(index + step + all.count) % all.count])
+    }
 
     func setRhythmStyle(_ style: RhythmStyle) {
         store.setRhythmStyle(style)

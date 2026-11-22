@@ -7,6 +7,7 @@ import SwiftUI
 struct PadsView: View {
     @ObservedObject var player: HarpPlayer
     @State private var touches = PadTouches()
+    @ObservedObject private var learn = MIDIControlCenter.shared.learn
 
     var body: some View {
         GeometryReader { proxy in
@@ -34,6 +35,16 @@ struct PadsView: View {
                     onEnded: { id in touches.end(id, player: player) }
                 )
                 .accessibilityHidden(true)
+                // MIDI Learn: over the touch surface, so a tap picks a pad to link (a
+                // linked button or key then holds the pad as a finger does).
+                if learn.isOn {
+                    ForEach(ChordPad.allCases, id: \.self) { pad in
+                        let frame = layout.frame(of: pad)
+                        MIDILearnOverlay(target: .pad(pad), learn: learn)
+                            .frame(width: frame.width, height: frame.height)
+                            .offset(x: frame.minX, y: frame.minY)
+                    }
+                }
             }
         }
         .accessibilityElement(children: .contain)

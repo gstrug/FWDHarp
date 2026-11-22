@@ -15,6 +15,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             topBar
             Divider()
+            MIDILearnBanner()
             HStack(spacing: 24) {
                 // MIX puts the mixer here, in place of the pads, so the plate beside it
                 // can be played while its level is set.
@@ -43,7 +44,9 @@ struct ContentView: View {
         }
         .background(Color(white: 0.08).ignoresSafeArea())
         .sheet(isPresented: $showCredits) { CreditsView() }
-        .sheet(isPresented: $showMIDI) { MIDIOutView(store: store) }
+        .sheet(isPresented: $showMIDI) { MIDISettingsView(player: player) }
+        // MIDI in: controllers, MIDI Learn and the clock, for this harp.
+        .onAppear { MIDIControlCenter.shared.start(player: player) }
         .loadingOverlay(store)
         // A safe moment to keep the instruments' sounds and save (FWD lesson 3).
         .onChange(of: scenePhase) { phase in
@@ -65,23 +68,17 @@ struct ContentView: View {
             AutoInstrumentGroup(player: player)
             Spacer(minLength: 8)
             HStack(spacing: 12) {
-                Button { showCredits = true } label: {
-                    Image(systemName: "info.circle")
-                        .font(.title3)
-                        .foregroundStyle(Color(white: 0.7))
-                        .frame(width: 36, height: 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("FWD Harp: About and Credits")
                 StudioToggleChip(title: "MIX", isOn: $showMixer, tint: StudioStyle.displayText,
                                  accessibilityLabel: "Mixer, in place of the pads")
-                // Lit while MIDI out is on; opens its settings.
-                StudioChipLabel(title: "MIDI", tint: .cyan, look: store.midiOut.enabled ? .on : .off)
+                // Lit while MIDI out is on or a MIDI clock is followed; opens MIDI settings.
+                StudioChipLabel(title: "MIDI", tint: .cyan,
+                                look: store.midiOut.enabled || player.isFollowingClock ? .on : .off)
                     .onTapGesture { showMIDI = true }
                     .accessibilityElement()
                     .accessibilityAddTraits(.isButton)
-                    .accessibilityLabel("MIDI out")
-                    .accessibilityValue(store.midiOut.enabled ? "On" : "Off")
+                    .accessibilityLabel("MIDI settings")
+                    .accessibilityValue(store.midiOut.enabled ? "Sending" : "Not sending")
+                MIDILearnButton()
                 // FWD Sequencer's panic button: the red stop sign.
                 Button { player.panic() } label: {
                     Image(systemName: "exclamationmark.octagon.fill")
@@ -92,12 +89,23 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Panic, stop all notes")
+                .midiLearnable(.panic)
                 CPUReadout()
             }
             Spacer(minLength: 8)
             HStack(spacing: 10) {
                 PartInstrumentButtons(store: store, part: .plate)
                 EffectsToggleButton(store: store, part: .plate)
+                    .midiLearnable(.partEffects(.plate))
+                // About and Credits, at the far right (Graham, 2026-11-22).
+                Button { showCredits = true } label: {
+                    Image(systemName: "info.circle")
+                        .font(.title3)
+                        .foregroundStyle(Color(white: 0.7))
+                        .frame(width: 36, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("FWD Harp: About and Credits")
             }
         }
         .padding(.horizontal, 20)
@@ -114,13 +122,11 @@ private struct AutoInstrumentGroup: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text("AUTO")
-                .font(.system(size: 11, weight: .bold)).tracking(0.8)
-                .foregroundStyle(StudioStyle.scaleText)
             PartInstrumentButtons(store: store, part: .auto,
                                   beforeChoosing: { player.setAutoHasOwnSound(true) })
             if store.hasOwnSound(.auto) {
                 EffectsToggleButton(store: store, part: .auto)
+                    .midiLearnable(.partEffects(.auto))
             }
         }
     }
@@ -272,6 +278,7 @@ private struct PlateControls: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .accessibilityLabel(label)
+        .midiLearnable(step > 0 ? .octaveUp : .octaveDown)
     }
 }
 
@@ -332,11 +339,13 @@ private struct AutoStrumBar: View {
                                            set: { player.setAutoStrumming($0) }),
                              tint: .green,
                              accessibilityLabel: "Auto-strum: pressing a pad plays the pattern")
+                .midiLearnable(.autoStrum)
             StudioToggleChip(title: "HOLD",
                              isOn: Binding(get: { player.selection.isHolding },
                                            set: { player.setHolding($0) }),
                              tint: .orange,
                              accessibilityLabel: "Hold: keep the last chord after lifting your hand")
+                .midiLearnable(.hold)
             // No STOP here: HOLD off lets the kept chord go, and with HOLD on it ends
             // when the drums stop (Graham, 2026-11-22).
             Menu {
@@ -364,15 +373,26 @@ private struct AutoStrumBar: View {
             }
             .accessibilityLabel("Pattern: \(player.autoStrumPattern.title)")
 
-            // One tempo for auto-strum and the rhythm section.
-            StudioReadout(value: Binding(get: { player.tempo }, set: { player.setTempo($0) }),
+            // One tempo for auto-strum and the rhythm section. Following a MIDI clock,
+            // it shows the clock's tempo and can't be changed here.
+            let following = player.isFollowingClock
+            StudioReadout(value: Binding(get: { following ? (player.clockTempo ?? player.tempo) : player.tempo },
+                                         set: { if !following { player.setTempo($0) } }),
                           range: AutoStrum.tempoRange,
                           defaultValue: AutoStrum.defaultTempo,
                           unit: "BPM",
-                          accessibilityLabel: "Tempo",
-                          format: { String(format: "%.0f", $0) })
-            StudioTapButton(title: "TAP") { player.tapTempo() }
-                .accessibilityLabel("Tap tempo")
+                          accessibilityLabel: following ? "Tempo, from the MIDI clock" : "Tempo",
+                          format: { String(format: following ? "%.1f" : "%.0f", $0) })
+                .disabled(following)
+                .midiLearnable(.tempo)
+            if following {
+                StudioChipLabel(title: "CLOCK", tint: .cyan, look: player.clockTempo == nil ? .off : .on)
+                    .accessibilityLabel(player.clockTempo == nil ? "Waiting for MIDI clock" : "Following MIDI clock")
+            } else {
+                StudioTapButton(title: "TAP") { player.tapTempo() }
+                    .accessibilityLabel("Tap tempo")
+                    .midiLearnable(.tapTempo)
+            }
             Spacer(minLength: 0)
         }
     }
@@ -393,12 +413,14 @@ private struct RhythmControls: View {
                              isOn: Binding(get: { running }, set: { _ in player.toggleRhythm() }),
                              tint: .green,
                              accessibilityLabel: "Start or stop the drums and bass")
+                .midiLearnable(.rhythmStartStop)
             StudioToggleChip(title: "SYNC",
                              isOn: Binding(get: { player.isRhythmArmed }, set: { player.armRhythm($0) }),
                              tint: .cyan,
                              accessibilityLabel: "Start the drums and bass with the first pad or strum")
                 .disabled(running)
                 .opacity(running ? 0.45 : 1)
+                .midiLearnable(.rhythmSync)
             Menu {
                 ForEach(RhythmStyle.allCases, id: \.self) { style in
                     Button {
@@ -429,6 +451,7 @@ private struct RhythmControls: View {
                                                set: { _ in player.setRhythmVariation(variation) }),
                                  tint: StudioStyle.displayText,
                                  accessibilityLabel: "Variation \(variation.title)")
+                    .midiLearnable(variation == .a ? .variationA : .variationB)
             }
             // INTRO before the start (it goes off once played); then OUTRO, which plays
             // the style's ending and stops the band (Graham, 2026-11-22).
@@ -437,17 +460,20 @@ private struct RhythmControls: View {
                                  isOn: Binding(get: { player.rhythm.outro }, set: { _ in player.outro() }),
                                  tint: .orange,
                                  accessibilityLabel: "Play the ending and stop")
+                    .midiLearnable(.introOutro)
             } else {
                 StudioToggleChip(title: "INTRO",
                                  isOn: Binding(get: { player.rhythmIntro }, set: { player.setRhythmIntro($0) }),
                                  tint: .orange,
                                  accessibilityLabel: "Play the style's intro bar first")
                     .allowsHitTesting(!running)
+                    .midiLearnable(.introOutro)
             }
             StudioTapButton(title: "FILL") { player.fill() }
                 .disabled(!running || player.rhythm.intro || player.rhythm.outro)
                 .opacity(!running || player.rhythm.intro || player.rhythm.outro ? 0.45 : 1)
                 .accessibilityLabel("Fill to the end of the bar")
+                .midiLearnable(.fill)
             BeatLights(position: player.rhythm, beats: player.rhythmStyle.beatsPerBar)
             Spacer(minLength: 0)
         }

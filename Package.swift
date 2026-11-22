@@ -27,6 +27,7 @@ let package = Package(
                 "Store/HarpPlayer.swift",
                 "Store/LevelMeters.swift",
                 "Store/CPUMonitor.swift",
+                "Store/MIDIControlCenter.swift",
                 // App bundle resources, loaded through Bundle.main; the core has no use
                 // for them and SwiftPM warns if they are neither declared nor excluded.
                 "Resources",
@@ -45,6 +46,7 @@ let package = Package(
                 "Engine/PluginLoadTracker.swift",
                 "Models/HarpSetup.swift",
                 "Models/MIDIMessage.swift",
+                "Models/MIDIControl.swift",
                 "Models/Pads.swift",
                 "Models/AutoStrum.swift",
                 "Models/MIDIOut.swift",

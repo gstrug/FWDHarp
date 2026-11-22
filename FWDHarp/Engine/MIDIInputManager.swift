@@ -38,7 +38,15 @@ nonisolated final class MIDIInputManager: @unchecked Sendable {
         set { lock.lock(); _onPerformanceMessage = newValue; lock.unlock() }
     }
 
+    /// Called on the CoreMIDI receive thread for MIDI clock and transport: 0xF8 clock,
+    /// 0xFA start, 0xFB continue, 0xFC stop, with when it was sent (host time, seconds).
+    var onRealtime: (@Sendable (Source, UInt8, Double) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return _onRealtime }
+        set { lock.lock(); _onRealtime = newValue; lock.unlock() }
+    }
+
     private let lock = OSAllocatedUnfairLock()
+    private var _onRealtime: (@Sendable (Source, UInt8, Double) -> Void)?
     private var _onMessage: (@Sendable (Source, MIDIControlMessage) -> Void)?
     private var _onPerformanceMessage: (@Sendable (Source, UInt8, UInt8, UInt8) -> Void)?
     private var client = MIDIClientRef()
@@ -118,11 +126,15 @@ nonisolated final class MIDIInputManager: @unchecked Sendable {
         let source = sourcesByToken[token]
         let handler = _onMessage
         let performance = _onPerformanceMessage
+        let realtime = _onRealtime
         lock.unlock()
         guard let source, let handler else { return }
 
         for packet in eventList.unsafeSequence() {
             let wordCount = Int(packet.pointee.wordCount)
+            // When it was sent, for the clock's tempo: CoreMIDI's stamp, or now.
+            let stamp = packet.pointee.timeStamp
+            let time = Self.seconds(hostTime: stamp == 0 ? mach_absolute_time() : stamp)
             withUnsafeBytes(of: packet.pointee.words) { raw in
                 let words = raw.bindMemory(to: UInt32.self)
                 var i = 0
@@ -131,7 +143,13 @@ nonisolated final class MIDIInputManager: @unchecked Sendable {
                     let type = word >> 28
                     // Type 2: a MIDI 1.0 channel-voice message in one word. The port
                     // was opened for MIDI 1.0, so that is what controllers arrive as.
-                    if type == 0x2 {
+                    // Type 1: system real-time, the clock and transport.
+                    if type == 0x1 {
+                        let status = UInt8((word >> 16) & 0xFF)
+                        if status == 0xF8 || status == 0xFA || status == 0xFB || status == 0xFC {
+                            realtime?(source, status, time)
+                        }
+                    } else if type == 0x2 {
                         let status = UInt8((word >> 16) & 0xFF)
                         let data1 = UInt8((word >> 8) & 0x7F)
                         let data2 = UInt8(word & 0x7F)
@@ -162,6 +180,15 @@ nonisolated final class MIDIInputManager: @unchecked Sendable {
         default: return 4
         }
     }
+
+    private static let timebase: Double = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return Double(info.numer) / Double(info.denom) / 1_000_000_000
+    }()
+
+    /// Host time (mach ticks) in seconds.
+    static func seconds(hostTime: UInt64) -> Double { Double(hostTime) * timebase }
 
     // MARK: Endpoint properties
 

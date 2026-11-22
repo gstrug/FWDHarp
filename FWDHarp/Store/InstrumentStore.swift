@@ -87,7 +87,6 @@ final class InstrumentStore: ObservableObject {
         engine.onLevelUpdate = { id, level in batcher.track(id, level) }
         engine.onMasterLevelUpdate = { level in batcher.master(level) }
         buildParts()
-        startMIDIInput()
         router.setSettings(setup.midiOut)
         updateRoutes()
     }
@@ -319,12 +318,18 @@ final class InstrumentStore: ObservableObject {
 
     /// A MIDI keyboard plays the plate's instrument directly: its notes, sustain pedal,
     /// mod wheel, pitch bend and aftertouch. Runs on CoreMIDI's thread and goes straight
-    /// to the engine, which is thread-safe and drops MIDI while a plugin loads.
-    private func startMIDIInput() {
+    /// to the engine, which is thread-safe and drops MIDI while a plugin loads. Keys and
+    /// controllers a MIDI Learn link uses control the app instead (`gate` says which),
+    /// and every message is also handed to `forward`, for links and activity lights.
+    /// Started by MIDIControlCenter, which starts the input.
+    func startMIDIInput(gate: MIDIInputGate,
+                        forward: @escaping @Sendable (MIDIInputManager.Source, MIDIControlMessage) -> Void) {
         let engine = engine
         let part = Self.trackID(for: .plate)
         let input = MIDIInputManager.shared
-        input.onMessage = { @Sendable _, message in
+        input.onMessage = { @Sendable source, message in
+            forward(source, message)
+            guard gate.playsPlate(device: source.name, message) else { return }
             switch message.kind {
             case .note:
                 let note = UInt8(message.number)
@@ -338,10 +343,10 @@ final class InstrumentStore: ObservableObject {
                                               data1: UInt8(message.number), data2: UInt8(message.value))
             }
         }
-        input.onPerformanceMessage = { @Sendable _, status, data1, data2 in
+        input.onPerformanceMessage = { @Sendable source, status, data1, data2 in
+            guard gate.playsPerformance(device: source.name) else { return }
             engine.sendPerformanceMessage(trackID: part, status: status, data1: data1, data2: data2)
         }
-        input.start()
     }
 
     // MARK: - Effects (as FWD Sequencer's SongStore)
