@@ -96,7 +96,8 @@ struct MIDISettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
-                        // Learn happens on the harp's screen, so close this to get there.
+                        // Learn happens on the harp's screen, so close this to get there
+                        // (the only Learn switch: Graham, 2026-11-22, not on the top bar).
                         center.learn.isOn = true
                         dismiss()
                     } label: {

@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - MIDI Learn on screen
 //
 // Copied from FWD Sequencer on 2026-11-22, so it works and looks the same. AUM-style:
-// switch LEARN on, tap a control on screen (it lights up orange), then move a knob or
+// switch Learn on (in the MIDI menu), tap a control on screen (it lights up orange), then move a knob or
 // press a button on the controller. The two are linked, and the control shows which
 // message it answers to. A long press on a linked control removes the link. Everything
 // else keeps working: the controller still plays the controls it is already linked to
@@ -78,16 +78,6 @@ struct MIDILearnOverlay: View {
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Learn \(target.displayName)")
             .accessibilityValue(selected ? "Waiting for MIDI" : (link.map { "Linked to \($0)" } ?? "Not linked"))
-    }
-}
-
-/// The LEARN switch on the top bar, lit orange while Learn is on, as FWD's.
-struct MIDILearnButton: View {
-    @ObservedObject private var learn = MIDIControlCenter.shared.learn
-
-    var body: some View {
-        StudioToggleChip(title: "LEARN", isOn: $learn.isOn, tint: .orange,
-                         accessibilityLabel: "MIDI Learn: link the controls on screen to a MIDI controller")
     }
 }
 

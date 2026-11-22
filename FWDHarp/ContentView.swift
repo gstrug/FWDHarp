@@ -78,7 +78,6 @@ struct ContentView: View {
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("MIDI settings")
                     .accessibilityValue(store.midiOut.enabled ? "Sending" : "Not sending")
-                MIDILearnButton()
                 // FWD Sequencer's panic button: the red stop sign.
                 Button { player.panic() } label: {
                     Image(systemName: "exclamationmark.octagon.fill")
