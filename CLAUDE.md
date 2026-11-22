@@ -265,5 +265,6 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   one-shot (not saved), goes off once played; while running the button is OUTRO
   (RhythmStyle.outro bar from the next bar line, then crash+kick+bass root, stop after
   2 beats). Top bar: AUTO instrument left (choosing one gives auto its own sound),
-  app buttons middle, plate instrument right; plate column rows: KEY+SCALE,
-  order+RING, STRINGS+OCT.
+  app buttons middle, plate instrument right; plate controls: a 2-row Grid,
+  KEY / order / RING over scale ("Chord") / STRINGS / OCT, fixedSize, trailing-aligned to the
+  300-wide plate (may be wider than it).
