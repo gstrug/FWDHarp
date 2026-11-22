@@ -257,3 +257,13 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   bar. SYNC arms start on first pad (AUTO on) or first strum (off). Parts .drums (…A3,
   GM kit, ch 10) and .bass (…A4, GM 33, ch 3) with mixer strips and MIDI rows. Style,
   variation, intro saved. Rhythm row (`RhythmControls`) under the AUTO row.
+- 2026-11-22: mixer at FWD's exact sizes (104 strips, dividers, fader 180, knob 52;
+  instruments under M; scrolls both ways). Auto-strum colour via
+  PlateScale.autoStrumColour: Blues = real blues scale on the chord root, Pentatonic
+  chord-following, Major/Natural Minor = key notes, Chord/Chromatic none. STOP removed
+  from the auto row; with HOLD on the kept chord ends when the rhythm stops. INTRO is a
+  one-shot (not saved), goes off once played; while running the button is OUTRO
+  (RhythmStyle.outro bar from the next bar line, then crash+kick+bass root, stop after
+  2 beats). Top bar: AUTO instrument left (choosing one gives auto its own sound),
+  app buttons middle, plate instrument right; plate column rows: KEY+SCALE,
+  order+RING, STRINGS+OCT.
