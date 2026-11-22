@@ -25,6 +25,21 @@ struct MIDISettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Learn, first and in plain sight: in the toolbar it showed as an icon
+                // only, which Graham did not see (2026-11-22).
+                Section {
+                    Button {
+                        startLearn()
+                    } label: {
+                        Label("Start MIDI Learn", systemImage: "dot.radiowaves.left.and.right")
+                            .font(.body.bold())
+                            .foregroundStyle(.orange)
+                    }
+                } header: {
+                    Text("MIDI Learn")
+                } footer: {
+                    Text("Closes this menu. Tap a control on screen, then move or press the one on your controller to link them. Tap Done on the orange strip when finished.")
+                }
                 controllersSection
                 templatesSection
                 clockSection
@@ -95,14 +110,7 @@ struct MIDISettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        // Learn happens on the harp's screen, so close this to get there
-                        // (the only Learn switch: Graham, 2026-11-22, not on the top bar).
-                        center.learn.isOn = true
-                        dismiss()
-                    } label: {
-                        Label("Learn", systemImage: "dot.radiowaves.left.and.right")
-                    }
+                    Button("Learn") { startLearn() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -122,6 +130,13 @@ struct MIDISettingsView: View {
             .onAppear(perform: refresh)
             .onDisappear { MIDIOutput.shared.onSetupChanged = nil }
         }
+    }
+
+    /// Learn happens on the harp's screen, so close this to get there (the only Learn
+    /// switch: Graham, 2026-11-22, not on the top bar).
+    private func startLearn() {
+        center.learn.isOn = true
+        dismiss()
     }
 
     // MARK: Controllers (as FWD's)
