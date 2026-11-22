@@ -279,6 +279,6 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   Conductor: every 2nd pulse (24 ppq) is a tick while following; own timing takes over
   0.3 s after pulses stop; Start → next pulse is beat 1, starts drums if transport on;
   things started while following align to the clock's eighth/beat. Views: MIDILearnable
-  (overlays, LEARN chip, banner), MIDISettingsView (was MIDIOutView: controllers,
+  (overlays, banner; Learn is switched on only from the MIDI menu's Learn button), MIDISettingsView (was MIDIOutView: controllers,
   templates, clock in, MIDI out). BPM shows the clock's tempo + CLOCK chip while
   following. Top bar: no AUTO label; ⓘ at far right. Untested on a device yet.
