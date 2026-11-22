@@ -268,3 +268,17 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   app buttons middle, plate instrument right; plate controls: a 2-row Grid,
   KEY / order / RING over scale ("Chord") / STRINGS / OCT, fixedSize, trailing-aligned to the
   300-wide plate (may be wider than it).
+- 2026-11-22: MIDI clock in + MIDI Learn (from FWD). `Models/MIDIControl.swift` (FWD's
+  links/templates/pickup/scaling with harp targets: pads (press+release), hold, auto,
+  tempo, tap, octave, rhythm start/stop/stop/sync/fill/intro-outro/A/B/styles, panic,
+  per-part volume/pan/mute/FX, master; built-in nanoKONTROL2: strips 1–4 = plate, auto,
+  drums, bass; fader 8 master, knob 8 tempo; ▶ start/stop, ■ stop, ● fill, cycle hold;
+  MIDIClockTempo). `Store/MIDIControlCenter.swift` (cut-down FWD centre; MIDIInputGate on
+  the MIDI thread decides keys → plate vs links; MIDIClockSettings in UserDefaults:
+  follow, source, transport). MIDIInputManager passes 0xF8/FA/FB/FC with timestamps.
+  Conductor: every 2nd pulse (24 ppq) is a tick while following; own timing takes over
+  0.3 s after pulses stop; Start → next pulse is beat 1, starts drums if transport on;
+  things started while following align to the clock's eighth/beat. Views: MIDILearnable
+  (overlays, LEARN chip, banner), MIDISettingsView (was MIDIOutView: controllers,
+  templates, clock in, MIDI out). BPM shows the clock's tempo + CLOCK chip while
+  following. Top bar: no AUTO label; ⓘ at far right. Untested on a device yet.
