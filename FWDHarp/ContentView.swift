@@ -29,12 +29,15 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
-                VStack(spacing: 10) {
+                // The controls may be wider than the plate; they line up with its right
+                // edge and take the room they need from the pads.
+                VStack(alignment: .trailing, spacing: 10) {
                     PlateControls(player: player)
+                        .fixedSize()
                     StrumPlateView(player: player)
+                        .frame(width: 300)
                         .frame(maxHeight: .infinity)
                 }
-                .frame(width: 300)
             }
             .padding(20)
         }
@@ -183,9 +186,6 @@ private struct ScaleMenu: View {
             }
         } label: {
             HStack(spacing: 6) {
-                Text("SCALE")
-                    .font(.system(size: 11, weight: .bold)).tracking(0.8)
-                    .foregroundStyle(StudioStyle.scaleText)
                 Text(player.plateScale.title)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(StudioStyle.displayText)
@@ -206,12 +206,11 @@ private struct PlateControls: View {
     @ObservedObject var player: HarpPlayer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        // Two rows in columns (Graham, 2026-11-22): KEY over the scale ("Chord"),
+        // the order over STRINGS, RING over OCT.
+        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
+            GridRow {
                 KeyMenu(player: player)
-                ScaleMenu(player: player)
-            }
-            HStack(spacing: 8) {
                 StudioMenu(title: player.platePattern.title, label: "Plate order") {
                     ForEach(PlatePattern.allCases, id: \.self) { pattern in
                         check(pattern.title, pattern == player.platePattern) { player.setPlatePattern(pattern) }
@@ -223,8 +222,10 @@ private struct PlateControls: View {
                     }
                 }
             }
-            HStack(spacing: 8) {
+            GridRow {
+                ScaleMenu(player: player)
                 StringsMenu(player: player)
+                HStack(spacing: 8) {
                 Text("OCT")
                     .font(.system(size: 11, weight: .bold)).tracking(0.8)
                     .foregroundStyle(StudioStyle.scaleText)
@@ -237,6 +238,7 @@ private struct PlateControls: View {
                     .accessibilityLabel("Octave \(player.octaveShift)")
                 octaveButton("chevron.up", step: 1, label: "Octave up",
                              enabled: player.octaveShift < StrumPlate.octaveShiftRange.upperBound)
+                }
             }
         }
     }
