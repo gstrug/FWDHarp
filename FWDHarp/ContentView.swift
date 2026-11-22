@@ -82,8 +82,16 @@ struct ContentView: View {
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("MIDI out")
                     .accessibilityValue(store.midiOut.enabled ? "On" : "Off")
-                StudioTapButton(title: "PANIC") { player.panic() }
-                    .accessibilityLabel("MIDI panic: stop every sounding note")
+                // FWD Sequencer's panic button: the red stop sign.
+                Button { player.panic() } label: {
+                    Image(systemName: "exclamationmark.octagon.fill")
+                        .font(.title3)
+                        .foregroundStyle(.red)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Panic, stop all notes")
                 CPUReadout()
             }
             Spacer(minLength: 8)
