@@ -202,6 +202,26 @@ nonisolated enum PlateScale: String, CaseIterable, Codable {
         return intervals.contains(3) || (intervals.contains(5) && !intervals.contains(4))
     }
 
+    /// The passing notes auto-strum's arpeggios take from the scale chosen, only
+    /// where they suit the chord (Graham, 2026-11-22):
+    /// - Major and Natural Minor: the key's own notes, which every pad's chord belongs to.
+    /// - Pentatonic: the chord's own pentatonic, major or minor, as on the plate.
+    /// - Blues: the blues scale on the chord's root (1 ♭3 4 ♭5 5 ♭7) for every chord,
+    ///   minor or major: its ♭3 and ♭5 sliding into the 3rd and 5th are the blues sound.
+    ///   (The plate keeps the gentler major form over major chords, for melodies.)
+    /// - Chord and Chromatic: none. Chromatic passing notes only sound like mistakes.
+    func autoStrumColour(in key: MajorKey, chord: Chord?) -> Set<Int>? {
+        switch self {
+        case .chord, .chromatic:
+            return nil
+        case .blues:
+            let root = chord?.root ?? key.tonic
+            return Set((intervals(minor: true) ?? []).map { (root + $0) % 12 })
+        case .major, .naturalMinor, .pentatonic:
+            return pitchClasses(in: key, chord: chord)
+        }
+    }
+
     /// The pitch classes the plate plays, in `key`, with `chord` held (or none).
     func pitchClasses(in key: MajorKey, chord: Chord?) -> Set<Int>? {
         let root: Int

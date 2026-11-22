@@ -4,7 +4,8 @@ import XCTest
 /// The rhythm section's patterns, its bass, and how it is saved.
 final class RhythmTests: XCTestCase {
     private func allBars(_ style: RhythmStyle) -> [(String, RhythmBar)] {
-        [("A", style.bar(.a)), ("B", style.bar(.b)), ("fill", style.fill), ("intro", style.intro)]
+        [("A", style.bar(.a)), ("B", style.bar(.b)), ("fill", style.fill), ("intro", style.intro),
+         ("outro", style.outro)]
     }
 
     func testEveryLineFillsTheBar() {
@@ -21,6 +22,7 @@ final class RhythmTests: XCTestCase {
                     XCTAssertNotEqual(bar.bass.first, "-", "\(style) \(name): a tie needs a note before it")
                 }
             }
+            XCTAssertFalse(style.outro.bass.isEmpty, "\(style) outro has a bass line")
             XCTAssertFalse(style.bar(.a).bass.isEmpty, "\(style) A has a bass line")
             XCTAssertFalse(style.bar(.b).bass.isEmpty, "\(style) B has a bass line")
             XCTAssertNotEqual(style.bar(.a), style.bar(.b), "\(style): B is a variation")
@@ -75,14 +77,12 @@ final class RhythmTests: XCTestCase {
         XCTAssertEqual(setup.midiOut.channel(for: .bass), 3)
         XCTAssertEqual(setup.rhythmStyle, .rock)
         XCTAssertEqual(setup.rhythmVariation, .a)
-        XCTAssertFalse(setup.rhythmIntro)
     }
 
     func testRhythmSettingsAreSaved() throws {
         var setup = HarpSetup()
         setup.rhythmStyle = .bossa
         setup.rhythmVariation = .b
-        setup.rhythmIntro = true
         var mix = setup.mix(of: .bass)
         mix.volume = 0.5
         setup.setMix(mix, for: .bass)
@@ -92,7 +92,6 @@ final class RhythmTests: XCTestCase {
         let back = try SetupStorage.decode(JSONEncoder().encode(setup))
         XCTAssertEqual(back.rhythmStyle, .bossa)
         XCTAssertEqual(back.rhythmVariation, .b)
-        XCTAssertTrue(back.rhythmIntro)
         XCTAssertEqual(back.mix(of: .bass).volume, 0.5)
         XCTAssertEqual(back.sound(of: .bass)?.builtInSound, 38)
         XCTAssertEqual(back.midiOut.channel(for: .drums), 11)
@@ -101,5 +100,23 @@ final class RhythmTests: XCTestCase {
         // A style from a later version falls back rather than losing the setup.
         let later = try SetupStorage.decode(Data(#"{"rhythmStyle": "polka"}"#.utf8))
         XCTAssertEqual(later.rhythmStyle, .rock)
+    }
+
+    func testAutoStrumColourOnlyWhereItSuits() {
+        let c = MajorKey(tonic: 0)
+        let cMajor = Chord(root: 0, quality: .major)
+        let dMinor = Chord(root: 2, quality: .minor)
+        XCTAssertNil(PlateScale.chord.autoStrumColour(in: c, chord: cMajor))
+        XCTAssertNil(PlateScale.chromatic.autoStrumColour(in: c, chord: cMajor), "chromatic passing notes sound wrong")
+        XCTAssertEqual(PlateScale.blues.autoStrumColour(in: c, chord: cMajor), [0, 3, 5, 6, 7, 10],
+                       "the blues scale over a major chord too")
+        XCTAssertEqual(PlateScale.blues.autoStrumColour(in: c, chord: dMinor), [2, 5, 7, 8, 9, 0])
+        XCTAssertEqual(PlateScale.pentatonic.autoStrumColour(in: c, chord: cMajor), [0, 2, 4, 7, 9])
+        XCTAssertEqual(PlateScale.pentatonic.autoStrumColour(in: c, chord: dMinor), [2, 5, 7, 9, 0])
+        XCTAssertEqual(PlateScale.major.autoStrumColour(in: c, chord: dMinor), [0, 2, 4, 5, 7, 9, 11])
+        // Over C: the ♭3 and ♭5 slide into the 3rd and 5th, the ♭7 into the octave.
+        let figure = AutoStrum.colouredFigure([48, 52, 55, 60],
+                                              scale: PlateScale.blues.autoStrumColour(in: c, chord: cMajor)!)
+        XCTAssertEqual(figure, [48, 51, 52, 54, 55, 58, 60])
     }
 }

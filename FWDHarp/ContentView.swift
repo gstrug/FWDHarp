@@ -54,9 +54,13 @@ struct ContentView: View {
     }
 
     private var topBar: some View {
-        // The app's controls on the left; the plate's on the right, over the plate.
-        // Same side padding as the pads and plate below, so the edges line up.
+        // Each part's instrument over its own side of the screen: auto-strum's on the
+        // left over the pads, the plate's on the right over the plate, and the app's
+        // own buttons in the middle (Graham, 2026-11-22). Same side padding as the pads
+        // and plate below, so the edges line up.
         HStack(spacing: 12) {
+            AutoInstrumentGroup(player: player)
+            Spacer(minLength: 8)
             HStack(spacing: 12) {
                 Button { showCredits = true } label: {
                     Image(systemName: "info.circle")
@@ -66,7 +70,6 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("FWD Harp: About and Credits")
-                keyMenu
                 StudioToggleChip(title: "MIX", isOn: $showMixer, tint: StudioStyle.displayText,
                                  accessibilityLabel: "Mixer, in place of the pads")
                 // Lit while MIDI out is on; opens its settings.
@@ -81,11 +84,7 @@ struct ContentView: View {
                 CPUReadout()
             }
             Spacer(minLength: 8)
-            // Everything that belongs to the plate, on the right over it: its range and
-            // scale, then its instrument, EDIT and FX (Graham, 2026-11-21).
             HStack(spacing: 10) {
-                StringsMenu(player: player)
-                ScaleMenu(player: player)
                 PartInstrumentButtons(store: store, part: .plate)
                 EffectsToggleButton(store: store, part: .plate)
             }
@@ -93,9 +92,34 @@ struct ContentView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
     }
+}
 
-    /// The key the pads play in.
-    private var keyMenu: some View {
+/// Auto-strum's instrument, EDIT and FX, at the left of the top bar over the pads.
+/// Until it has a sound of its own it plays through the plate's; choosing an
+/// instrument here gives it one (the mixer's OWN SOUND sends it back).
+private struct AutoInstrumentGroup: View {
+    @ObservedObject var player: HarpPlayer
+    private var store: InstrumentStore { player.store }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("AUTO")
+                .font(.system(size: 11, weight: .bold)).tracking(0.8)
+                .foregroundStyle(StudioStyle.scaleText)
+            PartInstrumentButtons(store: store, part: .auto,
+                                  beforeChoosing: { player.setAutoHasOwnSound(true) })
+            if store.hasOwnSound(.auto) {
+                EffectsToggleButton(store: store, part: .auto)
+            }
+        }
+    }
+}
+
+/// The key the pads play in.
+private struct KeyMenu: View {
+    @ObservedObject var player: HarpPlayer
+
+    var body: some View {
         Menu {
             ForEach(MajorKey.all, id: \.tonic) { key in
                 Button {
@@ -140,7 +164,7 @@ private struct StringsMenu: View {
     }
 }
 
-/// What the plate plays, after STRINGS: the chord held, or a scale in the key.
+/// What the plate plays, after KEY: the chord held, or a scale in the key.
 private struct ScaleMenu: View {
     @ObservedObject var player: HarpPlayer
 
@@ -176,13 +200,17 @@ private struct ScaleMenu: View {
     }
 }
 
-/// Above the plate: the order of its notes, how long they ring, and the octave
-/// buttons that move it.
+/// Above the plate, in three rows (Graham, 2026-11-22): the key and what the plate
+/// plays; the order of its notes and how long they ring; its strings and octave.
 private struct PlateControls: View {
     @ObservedObject var player: HarpPlayer
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                KeyMenu(player: player)
+                ScaleMenu(player: player)
+            }
             HStack(spacing: 8) {
                 StudioMenu(title: player.platePattern.title, label: "Plate order") {
                     ForEach(PlatePattern.allCases, id: \.self) { pattern in
@@ -196,6 +224,7 @@ private struct PlateControls: View {
                 }
             }
             HStack(spacing: 8) {
+                StringsMenu(player: player)
                 Text("OCT")
                     .font(.system(size: 11, weight: .bold)).tracking(0.8)
                     .foregroundStyle(StudioStyle.scaleText)
@@ -273,12 +302,8 @@ private struct AutoStrumBar: View {
                                            set: { player.setHolding($0) }),
                              tint: .orange,
                              accessibilityLabel: "Hold: keep the last chord after lifting your hand")
-            // With HOLD on the kept chord never ends by itself: STOP lets it go, which
-            // ends auto-strum's pattern too. HOLD stays on for the next chord.
-            StudioTapButton(title: "STOP") { player.stopKeptChord() }
-                .disabled(player.selection.latched == nil)
-                .opacity(player.selection.latched == nil ? 0.45 : 1)
-                .accessibilityLabel("Stop the kept chord")
+            // No STOP here: HOLD off lets the kept chord go, and with HOLD on it ends
+            // when the drums stop (Graham, 2026-11-22).
             Menu {
                 ForEach(AutoStrumPattern.allCases, id: \.self) { pattern in
                     Button {
@@ -370,13 +395,23 @@ private struct RhythmControls: View {
                                  tint: StudioStyle.displayText,
                                  accessibilityLabel: "Variation \(variation.title)")
             }
-            StudioToggleChip(title: "INTRO",
-                             isOn: Binding(get: { player.rhythmIntro }, set: { player.setRhythmIntro($0) }),
-                             tint: .orange,
-                             accessibilityLabel: "Play the style's intro bar first")
+            // INTRO before the start (it goes off once played); then OUTRO, which plays
+            // the style's ending and stops the band (Graham, 2026-11-22).
+            if running && !player.rhythm.intro {
+                StudioToggleChip(title: "OUTRO",
+                                 isOn: Binding(get: { player.rhythm.outro }, set: { _ in player.outro() }),
+                                 tint: .orange,
+                                 accessibilityLabel: "Play the ending and stop")
+            } else {
+                StudioToggleChip(title: "INTRO",
+                                 isOn: Binding(get: { player.rhythmIntro }, set: { player.setRhythmIntro($0) }),
+                                 tint: .orange,
+                                 accessibilityLabel: "Play the style's intro bar first")
+                    .allowsHitTesting(!running)
+            }
             StudioTapButton(title: "FILL") { player.fill() }
-                .disabled(!running || player.rhythm.intro)
-                .opacity(!running || player.rhythm.intro ? 0.45 : 1)
+                .disabled(!running || player.rhythm.intro || player.rhythm.outro)
+                .opacity(!running || player.rhythm.intro || player.rhythm.outro ? 0.45 : 1)
                 .accessibilityLabel("Fill to the end of the bar")
             BeatLights(position: player.rhythm, beats: player.rhythmStyle.beatsPerBar)
             Spacer(minLength: 0)
@@ -402,7 +437,7 @@ private struct BeatLights: View {
 
     private func color(for beat: Int) -> Color {
         guard position.running, beat == position.beat else { return Color(white: 0.22) }
-        if position.intro || position.fill { return .orange }
+        if position.intro || position.fill || position.outro { return .orange }
         return beat == 0 ? .green : Color.green.opacity(0.6)
     }
 }

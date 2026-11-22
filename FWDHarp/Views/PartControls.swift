@@ -9,6 +9,9 @@ struct PartInstrumentButtons: View {
     let part: HarpPart
     /// Narrow strips show the instrument chip above EDIT rather than beside it.
     var stacked = false
+    /// Called before a choice is applied to a part with no sound of its own yet
+    /// (auto-strum playing through the plate's), to give it one.
+    var beforeChoosing: (() -> Void)? = nil
 
     @State private var showPicker = false
     @State private var showBuiltInSounds = false
@@ -41,12 +44,16 @@ struct PartInstrumentButtons: View {
         }
         .sheet(isPresented: $showPicker) {
             PluginPickerView(
-                selectedPlugin: Binding(get: { store.plugin(for: part) }, set: { store.choose($0, for: part) }),
+                selectedPlugin: Binding(get: { store.plugin(for: part) }, set: { plugin in
+                    giveOwnSoundIfNeeded()
+                    store.choose(plugin, for: part)
+                }),
                 builtInSound: store.builtInSound(for: part)
             )
         }
         .sheet(isPresented: $showBuiltInSounds) {
             BuiltInSoundSheet(title: "\(part.title): Built-in Sound", current: store.builtInSound(for: part)) { sound in
+                giveOwnSoundIfNeeded()
                 store.setBuiltInSound(sound, for: part)
                 // Play the new sound at once, so it can be heard.
                 let id = InstrumentStore.trackID(for: part)
@@ -62,6 +69,12 @@ struct PartInstrumentButtons: View {
                              onCommitState: { store.captureInstrumentState(for: part) },
                              onReload: { store.reload(part) })
         }
+    }
+}
+
+private extension PartInstrumentButtons {
+    func giveOwnSoundIfNeeded() {
+        if !store.hasOwnSound(part) { beforeChoosing?() }
     }
 }
 

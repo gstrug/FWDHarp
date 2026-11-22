@@ -258,7 +258,6 @@ final class InstrumentStore: ObservableObject {
 
     func setRhythmStyle(_ style: RhythmStyle) { setup.rhythmStyle = style }
     func setRhythmVariation(_ variation: RhythmVariation) { setup.rhythmVariation = variation }
-    func setRhythmIntro(_ on: Bool) { setup.rhythmIntro = on }
 
     func setOctaveShift(_ shift: Int) {
         setup.octaveShift = min(max(shift, StrumPlate.octaveShiftRange.lowerBound),

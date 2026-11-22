@@ -85,11 +85,10 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var bassMix = ChannelMix()
     var masterVolume: Float = 1
     var midiOut = MIDIOutSettings()
-    /// The rhythm section's style, A or B, and whether it starts with its intro.
-    /// Whether it is running, and SYNC, are not saved: it always opens stopped.
+    /// The rhythm section's style and A or B. Whether it is running, SYNC and INTRO
+    /// are not saved: it always opens stopped, with no intro chosen.
     var rhythmStyle: RhythmStyle = .rock
     var rhythmVariation: RhythmVariation = .a
-    var rhythmIntro = false
 
     init() {}
 
@@ -179,7 +178,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
         case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic
         case plateStrings, octaveShift, autoStrumPattern, tempo, platePattern, plateScale
         case autoSound, plateMix, autoMix, masterVolume, plateRing, midiOut
-        case drumsSound, bassSound, drumsMix, bassMix, rhythmStyle, rhythmVariation, rhythmIntro
+        case drumsSound, bassSound, drumsMix, bassMix, rhythmStyle, rhythmVariation
     }
 
     /// Read from older files, never written.
@@ -223,7 +222,6 @@ nonisolated struct HarpSetup: Codable, Equatable {
         bassMix = try c.decodeIfPresent(ChannelMix.self, forKey: .bassMix) ?? ChannelMix()
         rhythmStyle = (try? c.decodeIfPresent(RhythmStyle.self, forKey: .rhythmStyle)) ?? .rock
         rhythmVariation = (try? c.decodeIfPresent(RhythmVariation.self, forKey: .rhythmVariation)) ?? .a
-        rhythmIntro = try c.decodeIfPresent(Bool.self, forKey: .rhythmIntro) ?? false
     }
 }
 

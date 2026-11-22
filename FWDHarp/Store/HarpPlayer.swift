@@ -50,10 +50,13 @@ final class HarpPlayer: ObservableObject {
         strummer.setTempo(store.setup.tempo)
         strummer.setStyle(store.setup.rhythmStyle)
         strummer.setVariation(store.setup.rhythmVariation)
-        strummer.setIntro(store.setup.rhythmIntro)
         strummer.onPosition = { [weak self] position in
             guard let self, position != rhythm else { return }
+            let stopped = rhythm.running && !position.running
             rhythm = position
+            // With HOLD on, the kept chord ends with the band, so auto-strum stops
+            // with the drums (Graham, 2026-11-22), after STOP or an outro.
+            if stopped, selection.isHolding { stopKeptChord() }
         }
         // Redraw when the key (in the store's setup) changes.
         store.objectWillChange
@@ -203,7 +206,8 @@ final class HarpPlayer: ObservableObject {
 
     var rhythmStyle: RhythmStyle { store.setup.rhythmStyle }
     var rhythmVariation: RhythmVariation { store.setup.rhythmVariation }
-    var rhythmIntro: Bool { store.setup.rhythmIntro }
+    /// INTRO lit: the next start plays the style's intro. It goes off once played.
+    var rhythmIntro: Bool { rhythm.introArmed }
 
     func setRhythmStyle(_ style: RhythmStyle) {
         store.setRhythmStyle(style)
@@ -216,8 +220,12 @@ final class HarpPlayer: ObservableObject {
     }
 
     func setRhythmIntro(_ on: Bool) {
-        store.setRhythmIntro(on)
         strummer.setIntro(on)
+    }
+
+    /// OUTRO: the style's ending from the next bar line, then the band stops.
+    func outro() {
+        strummer.outro()
     }
 
     /// START / STOP: the rhythm section at once (an armed SYNC is dropped).
@@ -244,7 +252,7 @@ final class HarpPlayer: ObservableObject {
     /// Tell the strummer the chord and plate as they are now.
     private func syncAutoStrum(newPad: Bool) {
         strummer.update(chord: chord, plateNotes: straightNotes,
-                        scale: plateScale.pitchClasses(in: key, chord: chord), newPad: newPad)
+                        scale: plateScale.autoStrumColour(in: key, chord: chord), newPad: newPad)
     }
 
     // MARK: Plate

@@ -8,6 +8,11 @@ nonisolated struct RhythmPosition: Equatable {
     var beat = 0
     var intro = false
     var fill = false
+    /// OUTRO pressed: waiting for the bar line, playing the last bar, or the final hit.
+    var outro = false
+    /// INTRO is lit: the next start plays the intro. It goes off once the intro has
+    /// played (Graham, 2026-11-22).
+    var introArmed = false
 }
 
 /// One clock for the rhythm section (drums and bass) and auto-strum, so they always
@@ -60,6 +65,11 @@ nonisolated final class Conductor: @unchecked Sendable {
     private var fillFromStep = 0
     /// A crash on the next bar's first beat: after an intro or a fill.
     private var crashNext = false
+    /// OUTRO: asked for (it starts at the next bar line), the bar it plays in, and,
+    /// after the final hit, the tick the rhythm stops on.
+    private var outroRequested = false
+    private var outroBar: Int?
+    private var endTick: Int?
     private var rhythmStartTick = 0
     /// The chord the bass plays: the one held, or the last one if none is.
     private var bassChord: Chord?
@@ -163,7 +173,21 @@ nonisolated final class Conductor: @unchecked Sendable {
     }
 
     func setIntro(_ on: Bool) {
-        locked { introEnabled = on }
+        locked {
+            introEnabled = on
+            reportAgain()
+        }
+    }
+
+    /// OUTRO: the style's last bar from the next bar line, then a final hit, then the
+    /// rhythm stops by itself.
+    func outro() {
+        locked {
+            guard rhythmOn, !introActive, outroBar == nil, endTick == nil else { return }
+            outroRequested = true
+            fillBar = nil
+            reportAgain()
+        }
     }
 
     var isRhythmRunning: Bool { locked { rhythmOn } }
@@ -199,7 +223,7 @@ nonisolated final class Conductor: @unchecked Sendable {
     /// then the style carries on, with a crash on the next bar.
     func fill() {
         locked {
-            guard rhythmOn, !introActive, fillBar == nil else { return }
+            guard rhythmOn, !introActive, fillBar == nil, !isEndingLocked else { return }
             let ticksPerBar = Self.ticksPerBeat * style.beatsPerBar
             let elapsed = max(0, lastTick - rhythmStartTick)
             let bar = elapsed / ticksPerBar
@@ -235,11 +259,16 @@ nonisolated final class Conductor: @unchecked Sendable {
         introActive = false
         fillBar = nil
         crashNext = false
+        outroRequested = false
+        outroBar = nil
+        endTick = nil
         releaseBassLocked()
         for drum in drumsSounding { router.stop(.drums, note: drum.note) }
         drumsSounding = []
         reportStopped()
     }
+
+    private var isEndingLocked: Bool { outroRequested || outroBar != nil || endTick != nil }
 
     private var needsClock: Bool {
         rhythmOn || (autoEnabled && chord != nil && pattern.isRhythmic)
@@ -323,8 +352,39 @@ nonisolated final class Conductor: @unchecked Sendable {
                 bar = 0
             }
             if let next = pendingVariation { variation = next; pendingVariation = nil }
-            if introActive, bar >= 1 { introActive = false; crashNext = true }
+            if introActive, bar >= 1 {
+                introActive = false
+                introEnabled = false   // played: INTRO goes off, and the button turns to OUTRO
+                crashNext = true
+            }
             if let fill = fillBar, bar > fill { fillBar = nil; crashNext = true }
+            if outroRequested { outroRequested = false; outroBar = bar; fillBar = nil }
+            if let last = outroBar, bar > last {
+                // The final hit: crash, kick and the bass's root, ringing two beats.
+                outroBar = nil
+                crashNext = false
+                endTick = tick + 2 * Self.ticksPerBeat
+                for (note, velocity) in [(DrumVoice.crash.note, UInt8(118)), (DrumVoice.kick.note, UInt8(118))] {
+                    router.stop(.drums, note: note)
+                    router.play(.drums, note: note, velocity: velocity)
+                    drumsSounding.append((note, tick + Self.ticksPerBeat))
+                }
+                if let chord = bassChord {
+                    releaseBassLocked()
+                    let midi = UInt8(RhythmBass.root(of: chord))
+                    router.play(.bass, note: midi, velocity: 110)
+                    bassSounding = (midi, tick + 2 * Self.ticksPerBeat)
+                }
+                report(bar: bar, beat: 0)
+                return
+            }
+        }
+        if let end = endTick {
+            if tick >= end {
+                stopRhythmLocked()
+                ensureClockLocked()
+            }
+            return
         }
         if tickInBar % Self.ticksPerBeat == 0 {
             report(bar: bar, beat: tickInBar / Self.ticksPerBeat)
@@ -337,6 +397,8 @@ nonisolated final class Conductor: @unchecked Sendable {
         let bars: RhythmBar
         if introActive {
             bars = style.intro
+        } else if let last = outroBar, last == bar {
+            bars = style.outro
         } else if let fill = fillBar, fill == bar, step >= fillFromStep {
             bars = style.fill
         } else {
@@ -414,13 +476,24 @@ nonisolated final class Conductor: @unchecked Sendable {
         }
     }
 
+    private var reportedBar = 0
+    private var reportedBeat = 0
+
+    /// The state has changed between beats: report it at the beat last shown.
+    private func reportAgain() {
+        if rhythmOn { report(bar: reportedBar, beat: reportedBeat) } else { reportStopped() }
+    }
+
     private func report(bar: Int, beat: Int) {
+        reportedBar = bar
+        reportedBeat = beat
         let position = RhythmPosition(running: rhythmOn, bar: bar, beat: beat, intro: introActive,
-                                      fill: fillBar != nil)
+                                      fill: fillBar != nil, outro: isEndingLocked, introArmed: introEnabled)
         DispatchQueue.main.async { [weak self] in self?.onPosition?(position) }
     }
 
     private func reportStopped() {
-        DispatchQueue.main.async { [weak self] in self?.onPosition?(RhythmPosition()) }
+        let position = RhythmPosition(introArmed: introEnabled)
+        DispatchQueue.main.async { [weak self] in self?.onPosition?(position) }
     }
 }

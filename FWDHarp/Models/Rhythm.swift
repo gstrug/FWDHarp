@@ -98,6 +98,48 @@ nonisolated enum RhythmStyle: String, CaseIterable, Codable {
     var fill: RhythmBar { patterns.fill }
     var intro: RhythmBar { patterns.intro }
 
+    /// The last bar, played when OUTRO is pressed: the next bar line starts it, and
+    /// the final hit (crash, kick and the bass's root) lands on the bar after.
+    var outro: RhythmBar {
+        switch self {
+        case .rock:
+            return RhythmBar(drums: [.kick: "x.....x.x.......", .snare: "....X.......xxXX",
+                                     .closedHat: "x.x.x.x.x.x....."],
+                             bass: "R-R-R-R-5-5-O-O-")
+        case .country:
+            return RhythmBar(drums: [.kick: "x.......x.......", .snare: "gogoXogoXoXoXXXX"],
+                             bass: "R---5---R---L---")
+        case .ballad:
+            return RhythmBar(drums: [.kick: "x.......x.......", .snare: "....x.......oxxx",
+                                     .ride: "o.o.o.o.o.o....."],
+                             bass: "R-------5---O---")
+        case .waltz:
+            return RhythmBar(drums: [.kick: "x...........", .snare: "....o...oxxX",
+                                     .closedHat: "x...x......."],
+                             bass: "R---5---O---")
+        case .bossa:
+            return RhythmBar(drums: [.kick: "x..x....x..x....", .rim: "x..x..x...x.x.x.",
+                                     .closedHat: "o.o.o.o.o.o.o.o."],
+                             bass: "R-----5-R-----5-")
+        case .reggae:
+            return RhythmBar(drums: [.kick: "........x.......", .rim: "........x.......",
+                                     .closedHat: "x.x.x.x.x.x.....", .snare: "............xxxX"],
+                             bass: "R-..R-..5-..O-..")
+        case .bluesShuffle:
+            return RhythmBar(drums: [.kick: "x.....x.....", .snare: "...X..xxx.xX",
+                                     .closedHat: "x.xx.xx....."],
+                             bass: "O..7..6..5..")
+        case .disco:
+            return RhythmBar(drums: [.kick: "x...x...x...x...", .clap: "....x.......xxxx",
+                                     .openHat: "..o...o...o....."],
+                             bass: "R-O-R-O-5-5-O-O-")
+        case .rnb:
+            return RhythmBar(drums: [.kick: "x......x..x.....", .snare: "....X.......xxXX",
+                                     .closedHat: "xoxoxoxoxoxo...."],
+                             bass: "R-----R-..5-O---")
+        }
+    }
+
     // swiftlint:disable function_body_length
     private var patterns: (a: RhythmBar, b: RhythmBar, fill: RhythmBar, intro: RhythmBar) {
         switch self {
