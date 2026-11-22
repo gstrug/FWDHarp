@@ -137,7 +137,7 @@ private struct KeyMenu: View {
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(StudioStyle.scaleText)
-                Text(player.key.name)
+                WidestText(player.key.name, all: MajorKey.all.map(\.name))
                     .font(.system(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(StudioStyle.displayText)
             }
@@ -153,7 +153,8 @@ private struct StringsMenu: View {
     @ObservedObject var player: HarpPlayer
 
     var body: some View {
-        StudioMenu(title: "STRINGS \(player.stringCount)", label: "Strings on the plate") {
+        StudioMenu(title: "STRINGS \(player.stringCount)", label: "Strings on the plate",
+                   titles: StrumPlate.stringChoices.map { "STRINGS \($0)" }) {
             ForEach(StrumPlate.stringChoices, id: \.self) { count in
                 Button { player.setPlateStrings(count) } label: {
                     if count == player.stringCount {
@@ -186,7 +187,7 @@ private struct ScaleMenu: View {
             }
         } label: {
             HStack(spacing: 6) {
-                Text(player.plateScale.title)
+                WidestText(player.plateScale.title, all: PlateScale.allCases.map(\.title))
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(StudioStyle.displayText)
                     .lineLimit(1)
@@ -211,12 +212,14 @@ private struct PlateControls: View {
         Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
             GridRow {
                 KeyMenu(player: player)
-                StudioMenu(title: player.platePattern.title, label: "Plate order") {
+                StudioMenu(title: player.platePattern.title, label: "Plate order",
+                           titles: PlatePattern.allCases.map(\.title)) {
                     ForEach(PlatePattern.allCases, id: \.self) { pattern in
                         check(pattern.title, pattern == player.platePattern) { player.setPlatePattern(pattern) }
                     }
                 }
-                StudioMenu(title: "RING \(player.plateRing.title)", label: "How long plate notes ring") {
+                StudioMenu(title: "RING \(player.plateRing.title)", label: "How long plate notes ring",
+                           titles: PlateRing.allCases.map { "RING \($0.title)" }) {
                     ForEach(PlateRing.allCases, id: \.self) { ring in
                         check(ring.title, ring == player.plateRing) { player.setPlateRing(ring) }
                     }
@@ -268,12 +271,15 @@ private struct PlateControls: View {
 private struct StudioMenu<Items: View>: View {
     let title: String
     let label: String
+    /// Every title it can show: its width is the widest, so nothing beside it moves
+    /// when the choice changes.
+    var titles: [String] = []
     @ViewBuilder let items: Items
 
     var body: some View {
         Menu { items } label: {
             HStack(spacing: 6) {
-                Text(title)
+                WidestText(title, all: titles)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(StudioStyle.displayText)
                     .lineLimit(1)
@@ -284,6 +290,25 @@ private struct StudioMenu<Items: View>: View {
             .studioWindow()
         }
         .accessibilityLabel("\(label): \(title)")
+    }
+}
+
+/// `text`, taking the width of the widest of `all`, so the controls around it stay
+/// put when it changes (Graham, 2026-11-22: the pads resized when the scale changed).
+private struct WidestText: View {
+    let text: String
+    let all: [String]
+
+    init(_ text: String, all: [String]) {
+        self.text = text
+        self.all = all
+    }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            ForEach(all, id: \.self) { Text($0).hidden() }
+            Text(text)
+        }
     }
 }
 
