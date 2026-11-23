@@ -138,27 +138,33 @@ private struct KeyMenu: View {
     @ObservedObject var player: HarpPlayer
 
     var body: some View {
+        // Major keys, then minor keys (Graham, 2026-11-23).
         Menu {
-            ForEach(MajorKey.all, id: \.tonic) { key in
-                Button {
-                    player.setKey(key)
-                } label: {
-                    if key == player.key { Label(key.name, systemImage: "checkmark") } else { Text(key.name) }
-                }
-            }
+            Section("Major") { keys(MusicKey.all.filter { !$0.isMinor }) }
+            Section("Minor") { keys(MusicKey.all.filter(\.isMinor)) }
         } label: {
             HStack(spacing: 6) {
                 Text("KEY")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(StudioStyle.scaleText)
-                WidestText(player.key.name, all: MajorKey.all.map(\.name))
+                WidestText(player.key.name, all: MusicKey.all.map(\.name))
                     .font(.system(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(StudioStyle.displayText)
             }
             .studioWindow()
         }
-        .accessibilityLabel("Key: \(player.key.name) major")
+        .accessibilityLabel("Key: \(player.key.fullName)")
+    }
+
+    private func keys(_ keys: [MusicKey]) -> some View {
+        ForEach(keys, id: \.self) { key in
+            Button {
+                player.setKey(key)
+            } label: {
+                if key == player.key { Label(key.fullName, systemImage: "checkmark") } else { Text(key.fullName) }
+            }
+        }
     }
 }
 

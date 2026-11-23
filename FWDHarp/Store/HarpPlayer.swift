@@ -83,7 +83,7 @@ final class HarpPlayer: ObservableObject {
             .store(in: &cancellables)
     }
 
-    var key: MajorKey { store.setup.key }
+    var key: MusicKey { store.setup.key }
     var chord: Chord? { selection.chord(in: key) }
     var plateScale: PlateScale { store.setup.plateScale }
     /// Strings on the plate: the number chosen, whatever it plays.
@@ -118,7 +118,7 @@ final class HarpPlayer: ObservableObject {
 
     private struct PlateInputs: Equatable {
         let chord: Chord?
-        let key: MajorKey
+        let key: MusicKey
         let scale: PlateScale
         let strings: Int
         let octaveShift: Int
@@ -200,7 +200,7 @@ final class HarpPlayer: ObservableObject {
         syncAutoStrum(newPad: false)
     }
 
-    func setKey(_ key: MajorKey) {
+    func setKey(_ key: MusicKey) {
         guard key != self.key else { return }
         stopRinging()
         store.setKey(key)

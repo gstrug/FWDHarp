@@ -16,6 +16,7 @@ struct PadsView: View {
                 ForEach(ChordPad.allCases, id: \.self) { pad in
                     let frame = layout.frame(of: pad)
                     PadFace(pad: pad,
+                            label: pad.degreeLabel(in: player.key),
                             chordName: player.chord(on: pad)?.name(preferFlats: player.key.prefersFlats),
                             isHeld: isHeld(pad),
                             isSounding: pad.isModifier ? player.selection.isInForce(pad)
@@ -98,6 +99,8 @@ private final class PadTouches {
 /// One pad, in the studio style: a raised cap that lights when held.
 private struct PadFace: View {
     let pad: ChordPad
+    /// Its degree in the key: IV I V / ii vi iii, or iv i V / VI III VII in a minor key.
+    let label: String
     let chordName: String?
     let isHeld: Bool
     /// The pad whose chord the plate is playing (the last pressed of those held).
@@ -119,7 +122,7 @@ private struct PadFace: View {
                     .stroke(Color.white.opacity(isHeld ? 0.35 : 0.10), lineWidth: 0.5))
                 .shadow(color: .black.opacity(isHeld ? 0.2 : 0.55), radius: isHeld ? 1 : 3, y: isHeld ? 1 : 3)
 
-            Text(pad.degreeLabel)
+            Text(label)
                 .font(.system(size: max(10, size.width * 0.13), weight: .semibold))
                 .foregroundStyle(isHeld || isSounding ? Color.black.opacity(0.6) : StudioStyle.scaleText)
                 .padding(size.width * 0.09)
@@ -133,7 +136,7 @@ private struct PadFace: View {
         }
         .scaleEffect(isHeld ? 0.97 : 1)
         .accessibilityElement()
-        .accessibilityLabel(pad.modifierTitle ?? chordName ?? pad.degreeLabel)
+        .accessibilityLabel(pad.modifierTitle ?? chordName ?? label)
         .accessibilityAddTraits(isHeld ? [.isButton, .isSelected] : .isButton)
     }
 }

@@ -56,13 +56,16 @@ nonisolated struct HarpSetup: Codable, Equatable {
     /// The key the pads play in: its tonic as a pitch class, 0 = C … 11 = B.
     var keyTonic: Int = 0
 
-    var key: MajorKey { MajorKey(tonic: keyTonic) }
+    /// A minor key (Graham, 2026-11-23); old setups open in the major key they had.
+    var keyMinor = false
+    var key: MusicKey { MusicKey(tonic: keyTonic, minor: keyMinor) }
     /// How many strings the plate has (StrumPlate.stringChoices), whatever it plays.
     var plateStrings: Int = StrumPlate.defaultStrings
     /// The plate moved up or down by whole octaves (StrumPlate.octaveShiftRange).
     var octaveShift: Int = 0
     /// Auto-strum's pattern and speed. Whether it is on is not saved: it starts off.
-    var autoStrumPattern: AutoStrumPattern = .arpeggioUp
+    /// New setups start on Style, the rhythm style's own harp part (2026-11-23).
+    var autoStrumPattern: AutoStrumPattern = .style
     /// The order of the notes up the plate for hand strumming.
     var platePattern: PlatePattern = .straight
     /// What the plate plays: the chord held, or a scale in the key.
@@ -175,7 +178,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic
+        case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic, keyMinor
         case plateStrings, octaveShift, autoStrumPattern, tempo, platePattern, plateScale
         case autoSound, plateMix, autoMix, masterVolume, plateRing, midiOut
         case drumsSound, bassSound, drumsMix, bassMix, rhythmStyle, rhythmVariation
@@ -193,6 +196,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
         effects = try c.decodeIfPresent([PluginSlot].self, forKey: .effects) ?? []
         effectsBypassed = try c.decodeIfPresent(Bool.self, forKey: .effectsBypassed) ?? false
         keyTonic = try c.decodeIfPresent(Int.self, forKey: .keyTonic) ?? 0
+        keyMinor = try c.decodeIfPresent(Bool.self, forKey: .keyMinor) ?? false
         // A setup saved with the old RANGE in octaves keeps the same strings it had.
         if let strings = try c.decodeIfPresent(Int.self, forKey: .plateStrings) {
             plateStrings = strings

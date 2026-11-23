@@ -106,24 +106,67 @@ nonisolated enum NoteNames {
     }
 }
 
-nonisolated struct MajorKey: Equatable, Codable {
+/// The key the pads play in: a major key, or (Graham, 2026-11-23) a minor one.
+///
+/// A minor key's chords are its natural minor's, with one change every song book makes:
+/// the 5 is MAJOR (E in A minor, the harmonic minor's), because that is the chord that
+/// leads home. The pads mirror the major layout: the key's own chords on top (iv i V),
+/// their relatives underneath (VI III VII), so A minor's pads are the same as C major's
+/// with the rows swapped (and E for Em). See ChordPad.
+nonisolated struct MusicKey: Equatable, Codable, Hashable {
     /// Pitch class of the tonic, 0 = C … 11 = B.
     var tonic: Int
+    var isMinor: Bool
 
-    private static let steps = [0, 2, 4, 5, 7, 9, 11]
-    private static let qualities: [ChordQuality] = [.major, .minor, .minor, .major, .major, .minor, .diminished]
-
-    /// The chord on scale degree 1–7.
-    func chord(degree: Int) -> Chord {
-        let i = ((degree - 1) % 7 + 7) % 7
-        return Chord(root: (tonic + Self.steps[i]) % 12, quality: Self.qualities[i])
+    init(tonic: Int, minor: Bool = false) {
+        self.tonic = tonic
+        self.isMinor = minor
     }
 
-    /// Keys written with flats (F, B♭, E♭, A♭, D♭) name their chords with flats.
-    var prefersFlats: Bool { [5, 10, 3, 8, 1].contains(tonic) }
+    private static let majorSteps = [0, 2, 4, 5, 7, 9, 11]
+    private static let majorQualities: [ChordQuality] = [.major, .minor, .minor, .major, .major, .minor, .diminished]
+    private static let minorSteps = [0, 2, 3, 5, 7, 8, 10]
+    private static let minorQualities: [ChordQuality] = [.minor, .diminished, .major, .minor, .minor, .major, .major]
 
-    var name: String { NoteNames.name(tonic, preferFlats: prefersFlats) }
+    /// The chord on scale degree 1–7 of the key's own scale (natural minor for a minor
+    /// key: its 5 is minor here; the 5 pad plays it major, see ChordPad).
+    func chord(degree: Int) -> Chord {
+        let i = ((degree - 1) % 7 + 7) % 7
+        let steps = isMinor ? Self.minorSteps : Self.majorSteps
+        let qualities = isMinor ? Self.minorQualities : Self.majorQualities
+        return Chord(root: (tonic + steps[i]) % 12, quality: qualities[i])
+    }
 
-    /// The twelve keys, C to B, for the key button.
-    static let all: [MajorKey] = (0..<12).map { MajorKey(tonic: $0) }
+    /// The key's scale: major, or natural minor.
+    var scale: Set<Int> {
+        Set((isMinor ? Self.minorSteps : Self.majorSteps).map { (tonic + $0) % 12 })
+    }
+
+    /// The key's home chord.
+    var tonicChord: Chord { Chord(root: tonic, quality: isMinor ? .minor : .major) }
+
+    /// Keys written with flats name their chords with flats: F, B♭, E♭, A♭, D♭ major,
+    /// and the minor keys that share their notes (D, G, C, F, B♭ minor).
+    var prefersFlats: Bool {
+        let major = isMinor ? (tonic + 3) % 12 : tonic
+        return [5, 10, 3, 8, 1].contains(major)
+    }
+
+    /// "C", "Am": as on the KEY button.
+    var name: String { NoteNames.name(tonic, preferFlats: prefersFlats) + (isMinor ? "m" : "") }
+
+    /// "C major", "A minor": as in the KEY menu.
+    var fullName: String { NoteNames.name(tonic, preferFlats: prefersFlats) + (isMinor ? " minor" : " major") }
+
+    /// The twelve major keys, C to B, then the twelve minor keys, for the key button.
+    static let all: [MusicKey] = (0..<12).map { MusicKey(tonic: $0) }
+        + (0..<12).map { MusicKey(tonic: ($0 + 9) % 12, minor: true) }
+
+    // A key saved before minor keys existed has only a tonic.
+    private enum CodingKeys: String, CodingKey { case tonic, isMinor }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tonic = try c.decode(Int.self, forKey: .tonic)
+        isMinor = try c.decodeIfPresent(Bool.self, forKey: .isMinor) ?? false
+    }
 }

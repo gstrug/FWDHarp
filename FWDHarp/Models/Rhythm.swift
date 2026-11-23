@@ -9,6 +9,10 @@ import Foundation
 /// `x` normal, `X` accent. Bass: `.` rest, `-` holds the note before, and a note:
 /// `R` the chord's root, `5` its fifth, `L` the fifth below the root, `O` the octave,
 /// `3` the chord's third, `6` the sixth, `7` the chord's seventh (or the flat seventh).
+/// Harp (auto-strum's Style pattern, 2026-11-23): `.` lets go, `-` lets it ring, `c` the
+/// chord (the plate's lowest chord notes and the root on top), `C` the chord accented,
+/// `u` the chord without its bottom note (a light upper chord), `R` and `5` a bass note
+/// below the chord (root, fifth), `1`–`4` one note of the chord, bottom up.
 nonisolated enum DrumVoice: Int, CaseIterable {
     // General MIDI drum notes, as the built-in drum kit and any GM kit plays them.
     case kick = 36, rim = 37, snare = 38, clap = 39, closedHat = 42, lowTom = 45, openHat = 46
@@ -23,6 +27,18 @@ nonisolated enum DrumVoice: Int, CaseIterable {
 nonisolated struct RhythmBar: Equatable {
     let drums: [DrumVoice: String]
     let bass: String
+    /// Auto-strum's harp part in the Style pattern. Empty: the main bar's plays (fills).
+    var harp: String = ""
+
+    func with(harp: String) -> RhythmBar {
+        RhythmBar(drums: drums, bass: bass, harp: harp)
+    }
+
+    /// What the harp does at `step`; nil for a rest (or past the end).
+    func harpMark(at step: Int) -> HarpMark? {
+        guard let mark = Self.mark(in: harp, at: step) else { return nil }
+        return HarpMark(mark)
+    }
 
     static func velocity(_ mark: Character) -> UInt8? {
         switch mark {
@@ -59,6 +75,32 @@ nonisolated struct RhythmBar: Equatable {
     }
 }
 
+/// One step of a style's harp part.
+nonisolated enum HarpMark: Equatable {
+    case hold
+    case chord(accent: Bool)
+    case upperChord
+    case bassRoot, bassFifth
+    /// One chord note, 0 the bottom one.
+    case note(Int)
+
+    /// Nil for `.`, a rest.
+    init?(_ mark: Character) {
+        switch mark {
+        case "-": self = .hold
+        case "c": self = .chord(accent: false)
+        case "C": self = .chord(accent: true)
+        case "u": self = .upperChord
+        case "R": self = .bassRoot
+        case "5": self = .bassFifth
+        case "1", "2", "3", "4": self = .note(Int(String(mark))! - 1)
+        default: return nil
+        }
+    }
+
+    static let marks: Set<Character> = [".", "-", "c", "C", "u", "R", "5", "1", "2", "3", "4"]
+}
+
 /// A bar read once into what the clock needs at each step, so playing it is a lookup:
 /// the drums struck (loudest first) and the bass note starting, if any. Reading the
 /// pattern's text on every step, as at first, made new arrays several times a step on
@@ -68,11 +110,16 @@ nonisolated struct CompiledRhythmBar {
     let bass: [(degree: Character, steps: Int)?]
     /// False for a fill without a bass line of its own: the main bar's bass plays.
     let hasBass: Bool
+    let harp: [HarpMark?]
+    /// False for a bar without a harp part of its own: the main bar's plays.
+    let hasHarp: Bool
 
     init(_ bar: RhythmBar, steps: Int) {
         hits = (0..<steps).map { bar.hits(at: $0) }
         bass = (0..<steps).map { bar.bassNote(at: $0) }
         hasBass = !bar.bass.isEmpty
+        harp = (0..<steps).map { bar.harpMark(at: $0) }
+        hasHarp = !bar.harp.isEmpty
     }
 }
 
@@ -111,6 +158,9 @@ nonisolated enum RhythmVariation: String, CaseIterable, Codable {
 
 nonisolated enum RhythmStyle: String, CaseIterable, Codable {
     case rock, country, ballad, waltz, bossa, reggae, bluesShuffle, disco, rnb
+    // Added 2026-11-23, the styles chord harps and arranger keyboards most often have
+    // that the first set lacked.
+    case swing, slowRock, march, funk, hipHop, samba, tango
 
     var title: String {
         switch self {
@@ -123,13 +173,21 @@ nonisolated enum RhythmStyle: String, CaseIterable, Codable {
         case .bluesShuffle: return "Blues Shuffle"
         case .disco: return "Dance / Disco"
         case .rnb: return "R&B"
+        case .swing: return "Swing / Jazz"
+        case .slowRock: return "Slow Rock 12/8"
+        case .march: return "March"
+        case .funk: return "Funk"
+        case .hipHop: return "Hip Hop"
+        case .samba: return "Samba / Latin"
+        case .tango: return "Tango"
         }
     }
 
     var beatsPerBar: Int { self == .waltz ? 3 : 4 }
 
-    /// Steps in a beat: four sixteenths, or three triplets for the shuffle.
-    var stepsPerBeat: Int { self == .bluesShuffle ? 3 : 4 }
+    /// Steps in a beat: four sixteenths, or three triplets for the shuffle, swing and
+    /// the 12/8 slow rock.
+    var stepsPerBeat: Int { [.bluesShuffle, .swing, .slowRock].contains(self) ? 3 : 4 }
 
     var stepsPerBar: Int { beatsPerBar * stepsPerBeat }
 
@@ -138,15 +196,41 @@ nonisolated enum RhythmStyle: String, CaseIterable, Codable {
     var swings: Bool { stepsPerBeat == 3 }
 
     func bar(_ variation: RhythmVariation) -> RhythmBar {
-        variation == .a ? patterns.a : patterns.b
+        variation == .a ? patterns.a.with(harp: harp.a) : patterns.b.with(harp: harp.b)
     }
 
+    /// A fill keeps the main bar's harp part.
     var fill: RhythmBar { patterns.fill }
-    var intro: RhythmBar { patterns.intro }
+    var intro: RhythmBar { patterns.intro.with(harp: harp.intro) }
 
     /// The last bar, played when OUTRO is pressed: the next bar line starts it, and
     /// the final hit (crash, kick and the bass's root) lands on the bar after.
-    var outro: RhythmBar {
+    var outro: RhythmBar { outroPattern.with(harp: harp.outro) }
+
+    /// Auto-strum's harp part in the Style pattern, for A, B, the intro and the outro:
+    /// what a guitarist or pianist would play in that style.
+    private var harp: (a: String, b: String, intro: String, outro: String) {
+        switch self {
+        case .rock: return ("c-c-c-c-c-c-c-c-", "C--c--c-C--c--c-", "c---------------", "c-c-c-c-c-c-C---")
+        case .country: return ("R-..u-..5-..u-..", "R-u-u-u-5-u-u-u-", "c---------------", "R-..u-..5-..C---")
+        case .ballad: return ("1-2-3-4-1-2-3-4-", "1---3---4---3---", "1-2-3-4-c-------", "1-2-3-4-C-------")
+        case .waltz: return ("R---u---u---", "R---u-u-u-u-", "c-----------", "R---u---C---")
+        case .bossa: return ("c-.c-.c-..c-.c-.", "c-.c-..c-.c-.c-.", "c---------------", "c-.c-.c-C-------")
+        case .reggae: return ("....u-......u-..", "..u...u...u...u.", "....u-......u-..", "....u-......C---")
+        case .bluesShuffle: return ("c-cc-cc-cc-c", "R-u5-uR-u5-u", "c-----------", "c-cc-cC-----")
+        case .disco: return ("..c...c...c...c.", "c.c.c.c.c.c.c.c.", "c---------------", "..c...c...C-----")
+        case .rnb: return ("c--c--c-....c-..", "..c-..c-..c-.cc-", "c---------------", "c--c--c-C-------")
+        case .swing: return ("c-.c-.c-.c-.", "...c-....c-.", "c-----------", "c-.c-.C-----")
+        case .slowRock: return ("CuuCuuCuuCuu", "123412341234", "c-----------", "CuuCuuC-----")
+        case .march: return ("R---u---5---u---", "R-u-u-u-5-u-u-u-", "................", "R---u---5---C---")
+        case .funk: return ("..u...u.u.u...u.", "u.u..u.uu.u..u.u", "u---------------", "..u...u.u.u.C---")
+        case .hipHop: return ("c-------....c---", "c---..c-c---..c-", "c---------------", "c-------....C---")
+        case .samba: return ("c.c..c.c.c..c.c.", ".cc.c.cc.cc.c.c.", "c---------------", "c.c..c.c.c..C---")
+        case .tango: return ("C...c...C...c.c.", "C..cc...C..cc...", "C---------------", "C...c...C---....")
+        }
+    }
+
+    private var outroPattern: RhythmBar {
         switch self {
         case .rock:
             return RhythmBar(drums: [.kick: "x.....x.x.......", .snare: "....X.......xxXX",
@@ -183,6 +267,29 @@ nonisolated enum RhythmStyle: String, CaseIterable, Codable {
             return RhythmBar(drums: [.kick: "x......x..x.....", .snare: "....X.......xxXX",
                                      .closedHat: "xoxoxoxoxoxo...."],
                              bass: "R-----R-..5-O---")
+        case .swing:
+            return RhythmBar(drums: [.ride: "x..x.x......", .snare: "......x..xxX", .kick: "x.....x....."],
+                             bass: "R--3--5--O--")
+        case .slowRock:
+            return RhythmBar(drums: [.kick: "x.....x.....", .snare: "...X.....xxX",
+                                     .closedHat: "xooxoo......"],
+                             bass: "R-----5--R--")
+        case .march:
+            return RhythmBar(drums: [.kick: "x.......x.......", .snare: "....X...xxxxX..."],
+                             bass: "R---5---R---L---")
+        case .funk:
+            return RhythmBar(drums: [.kick: "x..x..x...x.....", .snare: "....X..o....XxXX",
+                                     .closedHat: "xoxoxoxoxoxo...."],
+                             bass: "R.RR..5.O.7.R---")
+        case .hipHop:
+            return RhythmBar(drums: [.kick: "x......x.xx.....", .snare: "....X.......X..."],
+                             bass: "R------.R-......")
+        case .samba:
+            return RhythmBar(drums: [.kick: "x..xx..xx..x....", .rim: "x..x..x...x....."],
+                             bass: "R..5R..5R..5R---")
+        case .tango:
+            return RhythmBar(drums: [.kick: "x...x...x.......", .snare: "............xxX."],
+                             bass: "R---5---R---....")
         }
     }
 
@@ -305,6 +412,77 @@ nonisolated enum RhythmStyle: String, CaseIterable, Codable {
                 RhythmBar(drums: [.kick: "x......x........", .snare: "....X...x.xxxxXx"],
                           bass: ""),
                 RhythmBar(drums: [.kick: "x...............", .closedHat: "xoxoxoxoxoxoxoxo"],
+                          bass: "R---------------"))
+        case .swing:
+            return (
+                RhythmBar(drums: [.ride: "x..x.xx..x.x", .closedHat: "...x.....x..", .kick: "g..g..g..g.."],
+                          bass: "R--3--5--6--"),
+                RhythmBar(drums: [.ride: "x..x.xx..x.x", .closedHat: "...x.....x..", .snare: ".....o....o."],
+                          bass: "R--5--6--5--"),
+                RhythmBar(drums: [.kick: "x.....x.....", .snare: "...x..x.xxxX"],
+                          bass: ""),
+                RhythmBar(drums: [.ride: "x..x.xx..x.x", .closedHat: "...x.....x.."],
+                          bass: "R-----------"))
+        case .slowRock:
+            return (
+                RhythmBar(drums: [.kick: "x.....x.x...", .snare: "...X.....X..", .closedHat: "xooxooxooxoo"],
+                          bass: "R-----5--R--"),
+                RhythmBar(drums: [.kick: "x.....x.....", .snare: "...X.....X..", .ride: "xooxooxooxoo"],
+                          bass: "R--3--5--3--"),
+                RhythmBar(drums: [.kick: "x.....x.....", .snare: "...X..xxxxxX"],
+                          bass: ""),
+                RhythmBar(drums: [.kick: "x...........", .closedHat: "xooxooxooxoo"],
+                          bass: "R-----------"))
+        case .march:
+            return (
+                RhythmBar(drums: [.kick: "x.......x.......", .snare: "....X.......X.oo", .ride: "x...x...x...x..."],
+                          bass: "R-------5-------"),
+                RhythmBar(drums: [.kick: "x.......x.......", .snare: "o.o.X.o.o.o.X.oo", .ride: "x...x...x...x..."],
+                          bass: "R---5---R---5---"),
+                RhythmBar(drums: [.kick: "x.......x.......", .snare: "xoxoxoxoxxxxXXXX"],
+                          bass: ""),
+                RhythmBar(drums: [.snare: "xoxoxoxoxoxoXxXx"],
+                          bass: "................"))
+        case .funk:
+            return (
+                RhythmBar(drums: [.kick: "x..x..x...x.....", .snare: "....X..o.o..X..o", .closedHat: "xoxoxoxoxoxoxoxo"],
+                          bass: "R-.R-.5.O-.7.5.."),
+                RhythmBar(drums: [.kick: "x.x...x..x......", .snare: "....X......o.oX.", .closedHat: "xoxoxoxoxoxoxoxo"],
+                          bass: "R.RR..5.O.7.5.R."),
+                RhythmBar(drums: [.kick: "x..x..x.........", .snare: "....X..oxoxoXxXX"],
+                          bass: ""),
+                RhythmBar(drums: [.kick: "x...............", .closedHat: "xoxoxoxoxoxoxoxo"],
+                          bass: "R---------------"))
+        case .hipHop:
+            return (
+                RhythmBar(drums: [.kick: "x......x.xx.....", .snare: "....X.......X...", .closedHat: "x.x.x.x.x.x.x.x."],
+                          bass: "R------.R-....5-"),
+                RhythmBar(drums: [.kick: "x.x....x..x..x..", .snare: "....X.......X..o", .closedHat: "x.xxx.x.x.xxx.x."],
+                          bass: "R-..R--.5-..R---"),
+                RhythmBar(drums: [.kick: "x......x.x......", .snare: "....X...x.x.xXxX"],
+                          bass: ""),
+                RhythmBar(drums: [.closedHat: "x.x.x.x.x.x.x.x.", .snare: "............X..."],
+                          bass: "................"))
+        case .samba:
+            return (
+                RhythmBar(drums: [.kick: "x..xx..xx..xx..x", .rim: "x..x..x...x..x..", .tambourine: "xooxxooxxooxxoox"],
+                          bass: "R..5R..5R..5R..5"),
+                RhythmBar(drums: [.kick: "x..xx..xx..xx..x", .rim: "..x..x...x..x...", .tambourine: "xooxxooxxooxxoox",
+                                  .lowConga: "......x.......x."],
+                          bass: "R..5O..5R..5O..5"),
+                RhythmBar(drums: [.kick: "x..xx..xx..x....", .snare: "....x.x.xxxxXxXx"],
+                          bass: ""),
+                RhythmBar(drums: [.tambourine: "xooxxooxxooxxoox"],
+                          bass: "R---------------"))
+        case .tango:
+            return (
+                RhythmBar(drums: [.kick: "x...x...x...x...", .snare: "..............x.", .rim: "x..x..x.x......."],
+                          bass: "R---5---R---5-5-"),
+                RhythmBar(drums: [.kick: "x..xx...x..xx...", .rim: "x..x..x.x..x..x."],
+                          bass: "R--5R...R--5R..."),
+                RhythmBar(drums: [.kick: "x...x...x.......", .snare: "x.x.x.x.xxxxXXXX"],
+                          bass: ""),
+                RhythmBar(drums: [.rim: "x..x..x.x......."],
                           bass: "R---------------"))
         }
     }

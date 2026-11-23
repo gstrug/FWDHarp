@@ -30,7 +30,7 @@ nonisolated enum StrumPlate {
     /// The bottom string starts at the key's own note in the octave below middle C
     /// (C3 to B3), so the plate sits in the same place in every key; the octave buttons
     /// move it by whole octaves.
-    static func lowestNote(in key: MajorKey, octaveShift: Int = 0) -> Int {
+    static func lowestNote(in key: MusicKey, octaveShift: Int = 0) -> Int {
         48 + key.tonic + 12 * octaveShift
     }
 
@@ -61,15 +61,19 @@ nonisolated enum StrumPlate {
         return ordered(tones, strings: strings, pattern: pattern, bass: bass(of: chord, below: tones))
     }
 
-    /// A scale on the plate (PlateScale), one note per string up from the plate's
-    /// bottom (the key's note, moved by OCT), in the plate pattern's order. Pentatonic
-    /// and Blues follow `chord`, the one held now. Bass + Chord has no chord to take a
-    /// bass from, so it plays Straight.
-    static func notes(for scale: PlateScale, in key: MajorKey, chord: Chord?, strings: Int,
+    /// A scale on the plate (PlateScale), one note per string up from the chord's first
+    /// note at or above the plate's bottom (the key's note, moved by OCT), in the plate
+    /// pattern's order. Every scale follows `chord`, the one held now. Bass + Chord has
+    /// no chord to take a bass from, so it plays Straight.
+    static func notes(for scale: PlateScale, in key: MusicKey, chord: Chord?, strings: Int,
                       octaveShift: Int, pattern: PlatePattern) -> [Int] {
         guard let classes = scale.pitchClasses(in: key, chord: chord) else { return [] }
-        let tones = notes(pitchClasses: classes, strings: strings * 2 + 4,
-                          from: lowestNote(in: key, octaveShift: octaveShift))
+        // The bottom string is one of the chord's notes, as in Chord mode: the first at
+        // or above the plate's bottom, so a scale never starts on a clash (2026-11-23).
+        let bottom = lowestNote(in: key, octaveShift: octaveShift)
+        let home = Set((chord ?? key.tonicChord).pitchClasses)
+        let start = (bottom..<(bottom + 12)).first { home.contains($0 % 12) } ?? bottom
+        let tones = notes(pitchClasses: classes, strings: strings * 2 + 4, from: start)
         return ordered(tones, strings: strings, pattern: pattern == .bassAndChord ? .straight : pattern,
                        bass: nil)
     }
@@ -158,38 +162,38 @@ nonisolated enum PlatePattern: String, CaseIterable, Codable {
 }
 
 /// What the plate plays: the held chord's notes (the default), or a scale, which
-/// limits the plate to that scale's notes so a melody or solo cannot hit a wrong note
-/// (design brief, "Scales"). A scale plays whether or not a pad is held.
+/// gives the plate more notes for melody. A scale plays whether or not a pad is held
+/// (with none held, over the key's home chord).
 ///
-/// Major, Natural Minor and Chromatic are the key's. Pentatonic and Blues FOLLOW THE
-/// CHORD held (Graham, 2026-11-21: Blues on the key's note clashed with the other
-/// chords): built on its root, major over a major chord (C D E G A; blues C D E♭ E G
-/// A), minor over a minor or sus4 chord (A C D E G; blues A C D E♭ E G). With no chord
-/// held, on the key's note, major.
+/// Every scale FOLLOWS THE CHORD held, so whatever a non-musician strums sounds good
+/// (Graham, 2026-11-23, after Major, Natural Minor and Chromatic sounded off). The way
+/// arranger keyboards and jazz players do it: a scale's notes over a chord, less its
+/// "avoid notes", the ones that clash with the chord (a semitone above one of its
+/// notes, like F over C). See `fitted`.
+/// - Melody: the key's notes that fit the chord (over C in C: C D E G A B).
+/// - Pentatonic: the chord's own pentatonic, major over a major chord (C D E G A),
+///   minor over a minor or sus4 one (A C D E G).
+/// - Minor Pentatonic: the key's minor pentatonic (in C, A minor's: A C D E G; in
+///   A minor the same), the classic rock and blues lead, fitted to each chord.
+/// - Blues: over a major chord 1 2 3 5 6 ♭7 (the bluesy flat 7th, without the ♭3 that
+///   rubbed against the chord's 3rd); over a minor one the minor blues, 1 ♭3 4 ♭5 5 ♭7.
+///
+/// Natural Minor and Chromatic were taken out (2026-11-23): Natural Minor was the
+/// same notes as Major, and Chromatic clashed on every other string. A setup saved
+/// with them opens on Chord.
 nonisolated enum PlateScale: String, CaseIterable, Codable {
-    case chord, major, pentatonic, blues, naturalMinor, chromatic
+    case chord
+    /// Saved as "major", from when it was the key's whole major scale.
+    case major
+    case pentatonic, minorPentatonic, blues
 
     var title: String {
         switch self {
         case .chord: return "Chord"
-        case .major: return "Major"
+        case .major: return "Melody"
         case .pentatonic: return "Pentatonic"
+        case .minorPentatonic: return "Minor Pentatonic"
         case .blues: return "Blues"
-        case .naturalMinor: return "Natural Minor"
-        case .chromatic: return "Chromatic"
-        }
-    }
-
-    /// Semitones above the scale's root; nil for Chord. `minor` picks the minor form of
-    /// the scales that follow the chord.
-    func intervals(minor: Bool = false) -> [Int]? {
-        switch self {
-        case .chord: return nil
-        case .major: return [0, 2, 4, 5, 7, 9, 11]
-        case .pentatonic: return minor ? [0, 3, 5, 7, 10] : [0, 2, 4, 7, 9]
-        case .blues: return minor ? [0, 3, 5, 6, 7, 10] : [0, 2, 3, 4, 7, 9]
-        case .naturalMinor: return [0, 2, 3, 5, 7, 8, 10]   // the key's relative minor
-        case .chromatic: return Array(0..<12)
         }
     }
 
@@ -200,45 +204,61 @@ nonisolated enum PlateScale: String, CaseIterable, Codable {
         return intervals.contains(3) || (intervals.contains(5) && !intervals.contains(4))
     }
 
-    /// The passing notes auto-strum's arpeggios take from the scale chosen, only
-    /// where they suit the chord (Graham, 2026-11-22):
-    /// - Major and Natural Minor: the key's own notes, which every pad's chord belongs to.
-    /// - Pentatonic: the chord's own pentatonic, major or minor, as on the plate.
-    /// - Blues: the blues scale on the chord's root (1 ♭3 4 ♭5 5 ♭7) for every chord,
-    ///   minor or major: its ♭3 and ♭5 sliding into the 3rd and 5th are the blues sound.
-    ///   (The plate keeps the gentler major form over major chords, for melodies.)
-    /// - Chord and Chromatic: none. Chromatic passing notes only sound like mistakes.
-    func autoStrumColour(in key: MajorKey, chord: Chord?) -> Set<Int>? {
-        switch self {
-        case .chord, .chromatic:
-            return nil
-        case .blues:
-            let root = chord?.root ?? key.tonic
-            return Set((intervals(minor: true) ?? []).map { (root + $0) % 12 })
-        case .major, .naturalMinor, .pentatonic:
-            return pitchClasses(in: key, chord: chord)
-        }
-    }
-
-    /// The pitch classes the plate plays, in `key`, with `chord` held (or none).
-    func pitchClasses(in key: MajorKey, chord: Chord?) -> Set<Int>? {
-        let root: Int
-        let minor: Bool
+    /// The pitch classes the plate plays, in `key`, with `chord` held (none: the key's
+    /// home chord). Nil for Chord.
+    func pitchClasses(in key: MusicKey, chord: Chord?) -> Set<Int>? {
+        let chord = chord ?? key.tonicChord
+        func on(_ root: Int, _ intervals: [Int]) -> Set<Int> { Set(intervals.map { (root + $0) % 12 }) }
+        let minor = Self.isMinorFlavour(chord)
         switch self {
         case .chord:
             return nil
-        case .pentatonic, .blues:
-            root = chord?.root ?? key.tonic
-            minor = chord.map(Self.isMinorFlavour) ?? false
-        case .naturalMinor:
-            root = (key.tonic + 9) % 12
-            minor = false
-        case .major, .chromatic:
-            root = key.tonic
-            minor = false
+        case .major:
+            return Self.fitted(key.scale, to: chord, in: key)
+        case .pentatonic:
+            return on(chord.root, minor ? [0, 3, 5, 7, 10] : [0, 2, 4, 7, 9])
+        case .minorPentatonic:
+            // The key's minor: its own tonic, or a major key's relative minor.
+            let root = key.isMinor ? key.tonic : (key.tonic + 9) % 12
+            return Self.fitted(on(root, [0, 3, 5, 7, 10]), to: chord, in: key)
+        case .blues:
+            return on(chord.root, minor ? [0, 3, 5, 6, 7, 10] : [0, 2, 4, 7, 9, 10])
         }
-        guard let intervals = intervals(minor: minor) else { return nil }
-        return Set(intervals.map { (root + $0) % 12 })
+    }
+
+    /// `scale` over `chord`, with the notes that clash taken out and the chord's own
+    /// notes always in:
+    /// - a note a semitone above a chord note (the classic avoid note: F over C,
+    ///   C over G, F over Am and Em);
+    /// - a note a semitone below a chord note the key does not have (G under the G♯
+    ///   of E major in A minor; B under the B♭ of C7);
+    /// - with a sus4 chord, its missing 3rd, which the 4th replaced.
+    static func fitted(_ scale: Set<Int>, to chord: Chord, in key: MusicKey) -> Set<Int> {
+        let tones = Set(chord.pitchClasses)
+        let keyNotes = key.scale
+        var result = scale.filter { note in
+            if tones.contains((note + 11) % 12) { return false }
+            let above = (note + 1) % 12
+            if tones.contains(above), !keyNotes.contains(above) { return false }
+            return true
+        }
+        let intervals = chord.quality.intervals
+        if intervals.contains(5), !intervals.contains(4), !intervals.contains(3) {
+            result.remove((chord.root + 3) % 12)
+            result.remove((chord.root + 4) % 12)
+        }
+        return result.union(tones)
+    }
+
+    /// The passing notes auto-strum's arpeggios may take (Graham, 2026-11-23): only the
+    /// pentatonics', which never clash, and only on the off-beats (AutoStrum.cycle).
+    /// Every other scale leaves auto-strum on the chord's own notes, as an arranger
+    /// keyboard's chord parts are.
+    func autoStrumColour(in key: MusicKey, chord: Chord?) -> Set<Int>? {
+        switch self {
+        case .pentatonic, .minorPentatonic: return pitchClasses(in: key, chord: chord)
+        case .chord, .major, .blues: return nil
+        }
     }
 }
 

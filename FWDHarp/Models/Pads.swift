@@ -32,7 +32,42 @@ nonisolated enum ChordPad: String, CaseIterable, Codable {
 
     var isModifier: Bool { degree == nil }
 
-    /// The label in the corner of the pad.
+    /// The scale degree it plays in `key`. A minor key mirrors the major layout: its
+    /// own chords on top (iv i V), their relatives underneath (VI III VII).
+    func degree(in key: MusicKey) -> Int? {
+        guard key.isMinor else { return degree }
+        switch self {
+        case .two: return 6
+        case .six: return 3
+        case .three: return 7
+        default: return degree
+        }
+    }
+
+    /// The chord this pad plays in `key`, before the modifiers. In a minor key the 5
+    /// is major (E in A minor), as song books play it.
+    func chord(in key: MusicKey) -> Chord? {
+        guard let degree = degree(in: key) else { return nil }
+        let chord = key.chord(degree: degree)
+        if key.isMinor, self == .five { return Chord(root: chord.root, quality: .major) }
+        return chord
+    }
+
+    /// The label in the corner of the pad, in `key`.
+    func degreeLabel(in key: MusicKey) -> String {
+        guard key.isMinor else { return degreeLabel }
+        switch self {
+        case .four: return "iv"
+        case .one: return "i"
+        case .five: return "V"
+        case .two: return "VI"
+        case .six: return "III"
+        case .three: return "VII"
+        case .seven, .sus2, .sus4: return ""
+        }
+    }
+
+    /// The label in the corner of the pad, in a major key.
     var degreeLabel: String {
         switch self {
         case .four: return "IV"
@@ -217,9 +252,8 @@ nonisolated struct PadSelection: Equatable {
     /// The chord a pad plays in `key`; nil for a modifier. The pad sounding now takes
     /// the modifiers in force (kept ones included); any other pad shows what pressing
     /// it would play, with the modifiers held now.
-    func chord(on pad: ChordPad, in key: MajorKey) -> Chord? {
-        guard let degree = pad.degree else { return nil }
-        var chord = key.chord(degree: degree)
+    func chord(on pad: ChordPad, in key: MusicKey) -> Chord? {
+        guard var chord = pad.chord(in: key) else { return nil }
         let sounding = pad == current
         if sounding ? seventhInForce : seventhHeld { chord = chord.withSeventh }
         if let suspension = sounding ? suspensionInForce : suspension { chord = chord.suspended(suspension) }
@@ -237,7 +271,7 @@ nonisolated struct PadSelection: Equatable {
     }
 
     /// The chord to play in `key`, or nil when no chord pad is held.
-    func chord(in key: MajorKey) -> Chord? {
+    func chord(in key: MusicKey) -> Chord? {
         current.flatMap { chord(on: $0, in: key) }
     }
 }

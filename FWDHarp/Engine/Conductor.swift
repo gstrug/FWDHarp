@@ -52,6 +52,10 @@ nonisolated final class Conductor: @unchecked Sendable {
     /// The pattern's steps for the chord held, worked out when the chord, plate,
     /// scale or pattern change, so each step is a lookup.
     private var autoCycle: [[UInt8]] = []
+    /// For the Style pattern: the chord as the harp plays it (the plate's lowest chord
+    /// notes and the root on top), and the bass notes below it.
+    private var styleFigure: [UInt8] = []
+    private var styleBass: (root: UInt8, fifth: UInt8)?
     /// Bumped to cancel a single sweep in progress.
     private var sweepGeneration: UInt64 = 0
 
@@ -240,7 +244,14 @@ nonisolated final class Conductor: @unchecked Sendable {
 
     func setStyle(_ newStyle: RhythmStyle) {
         locked {
-            if rhythmOn { pendingStyle = newStyle } else { style = newStyle }
+            if rhythmOn {
+                pendingStyle = newStyle
+            } else if newStyle != style {
+                style = newStyle
+                rebuildAutoCycleLocked()
+                // Auto-strum alone starts the new style's pattern from its top.
+                autoOriginTick = alignedTickLocked(step: autoStepTicks)
+            }
         }
     }
 
@@ -284,7 +295,7 @@ nonisolated final class Conductor: @unchecked Sendable {
             introActive = introEnabled
             fillBar = nil
             crashNext = false
-            if let pendingStyle { style = pendingStyle; self.pendingStyle = nil }
+            if let pendingStyle { style = pendingStyle; self.pendingStyle = nil; rebuildAutoCycleLocked() }
             if let pendingVariation { variation = pendingVariation; self.pendingVariation = nil }
             // Following a clock: on its next beat.
             rhythmStartTick = clockRunning ? alignedTickLocked(step: Self.ticksPerBeat) : 0
@@ -466,6 +477,7 @@ nonisolated final class Conductor: @unchecked Sendable {
             // A bar begins: the next style or variation, the end of an intro or fill.
             if let next = pendingStyle {
                 style = next
+                rebuildAutoCycleLocked()
                 pendingStyle = nil
                 // The bar is counted afresh in the new style's metre.
                 rhythmStartTick = tick
@@ -488,6 +500,15 @@ nonisolated final class Conductor: @unchecked Sendable {
                 endTick = tick + 2 * Self.ticksPerBeat
                 strikeLocked(DrumVoice.crash.note, velocity: 118, releaseTick: tick + Self.ticksPerBeat)
                 strikeLocked(DrumVoice.kick.note, velocity: 118, releaseTick: tick + Self.ticksPerBeat)
+                // Auto-strum's Style part ends on the chord with them.
+                if autoEnabled, pattern == .style, chord != nil {
+                    releaseAutoLocked()
+                    for note in styleFigure {
+                        router.stop(.auto, note: note)
+                        router.play(.auto, note: note, velocity: 112)
+                    }
+                    autoSounding = styleFigure
+                }
                 if let chord = bassChord {
                     releaseBassLocked()
                     let midi = UInt8(RhythmBass.root(of: chord))
@@ -547,9 +568,64 @@ nonisolated final class Conductor: @unchecked Sendable {
     }
 
     private func rebuildAutoCycleLocked() {
-        guard let chord, pattern.isRhythmic else { autoCycle = []; return }
-        autoCycle = AutoStrum.cycle(pattern, plateNotes: plateNotes, chord: chord, scale: scale)
-            .map { step in step.filter { (0...127).contains($0) }.map { UInt8($0) } }
+        guard let chord, pattern.isRhythmic else { autoCycle = []; styleFigure = []; styleBass = nil; return }
+        func midi(_ notes: [Int]) -> [UInt8] { notes.filter { (0...127).contains($0) }.map { UInt8($0) } }
+        // In the chosen style's metre, so Bass + Chord is an oom-pah-pah in 3/4.
+        autoCycle = AutoStrum.cycle(pattern, plateNotes: plateNotes, chord: chord, scale: scale,
+                                    beatsPerBar: style.beatsPerBar).map(midi)
+        styleFigure = midi(AutoStrum.figure(plateNotes: plateNotes, chordSize: chord.pitchClasses.count))
+        styleBass = AutoStrum.bass(plateNotes: plateNotes, root: chord.root).flatMap { bass in
+            (0...127).contains(bass.root) && (0...127).contains(bass.fifth)
+                ? (UInt8(bass.root), UInt8(bass.fifth)) : nil
+        }
+    }
+
+    /// Auto-strum's Style pattern: the style's harp part, on the style's grid, from the
+    /// rhythm's first bar while it runs (its intro and outro too), or from the pad.
+    private func playStyleAutoLocked(_ tick: Int) {
+        let origin = rhythmOn ? rhythmStartTick : autoOriginTick
+        let at = tick - origin
+        let ticksPerStep = Self.ticksPerBeat / style.stepsPerBeat
+        // After the outro's final hit, its chord rings until the band stops.
+        guard at >= 0, at % ticksPerStep == 0, !(rhythmOn && endTick != nil) else { return }
+        let index = at / ticksPerStep
+        let step = index % style.stepsPerBar
+        let bar = index / style.stepsPerBar
+        let compiled = style.compiled
+        let main = compiled.bar(variation)
+        var line = main
+        if rhythmOn {
+            if introActive { line = compiled.intro } else if let last = outroBar, last == bar { line = compiled.outro }
+        }
+        if !line.hasHarp { line = main }
+        guard line.harp.indices.contains(step) else { return }
+        let notes: [UInt8]
+        var velocity = AutoStrum.velocity
+        switch line.harp[step] {
+        case .hold?:
+            return
+        case nil:
+            releaseAutoLocked()
+            return
+        case .chord(let accent)?:
+            notes = styleFigure
+            if accent { velocity = 112 }
+        case .upperChord?:
+            notes = Array(styleFigure.dropFirst())
+            velocity = 84
+        case .bassRoot?:
+            notes = styleBass.map { [$0.root] } ?? []
+        case .bassFifth?:
+            notes = styleBass.map { [$0.fifth] } ?? []
+        case .note(let i)?:
+            notes = styleFigure.isEmpty ? [] : [styleFigure[min(i, styleFigure.count - 1)]]
+        }
+        releaseAutoLocked()
+        for note in notes {
+            router.stop(.auto, note: note)
+            router.play(.auto, note: note, velocity: velocity)
+        }
+        autoSounding = notes
     }
 
     /// One drum hit, released at `releaseTick`.
@@ -561,6 +637,7 @@ nonisolated final class Conductor: @unchecked Sendable {
 
     private func playAutoLocked(_ tick: Int) {
         guard autoEnabled, chord != nil, pattern.isRhythmic else { return }
+        if pattern == .style { playStyleAutoLocked(tick); return }
         let origin = rhythmOn ? rhythmStartTick : autoOriginTick
         let at = tick - origin
         guard at >= 0 else { return }

@@ -102,22 +102,24 @@ final class RhythmTests: XCTestCase {
         XCTAssertEqual(later.rhythmStyle, .rock)
     }
 
-    func testAutoStrumColourOnlyWhereItSuits() {
-        let c = MajorKey(tonic: 0)
-        let cMajor = Chord(root: 0, quality: .major)
-        let dMinor = Chord(root: 2, quality: .minor)
-        XCTAssertNil(PlateScale.chord.autoStrumColour(in: c, chord: cMajor))
-        XCTAssertNil(PlateScale.chromatic.autoStrumColour(in: c, chord: cMajor), "chromatic passing notes sound wrong")
-        XCTAssertEqual(PlateScale.blues.autoStrumColour(in: c, chord: cMajor), [0, 3, 5, 6, 7, 10],
-                       "the blues scale over a major chord too")
-        XCTAssertEqual(PlateScale.blues.autoStrumColour(in: c, chord: dMinor), [2, 5, 7, 8, 9, 0])
-        XCTAssertEqual(PlateScale.pentatonic.autoStrumColour(in: c, chord: cMajor), [0, 2, 4, 7, 9])
-        XCTAssertEqual(PlateScale.pentatonic.autoStrumColour(in: c, chord: dMinor), [2, 5, 7, 9, 0])
-        XCTAssertEqual(PlateScale.major.autoStrumColour(in: c, chord: dMinor), [0, 2, 4, 5, 7, 9, 11])
-        // Over C: the ♭3 and ♭5 slide into the 3rd and 5th, the ♭7 into the octave.
-        let figure = AutoStrum.colouredFigure([48, 52, 55, 60],
-                                              scale: PlateScale.blues.autoStrumColour(in: c, chord: cMajor)!)
-        XCTAssertEqual(figure, [48, 51, 52, 54, 55, 58, 60])
+    /// Every style has a harp part for auto-strum's Style pattern, the bar's length.
+    func testEveryStyleHasAHarpPart() {
+        for style in RhythmStyle.allCases {
+            for (name, bar) in [("A", style.bar(.a)), ("B", style.bar(.b)), ("intro", style.intro),
+                                ("outro", style.outro)] {
+                XCTAssertEqual(bar.harp.count, style.stepsPerBar, "\(style) \(name) harp")
+                XCTAssertTrue(bar.harp.allSatisfy(HarpMark.marks.contains), "\(style) \(name): \(bar.harp)")
+            }
+            XCTAssertTrue(style.fill.harp.isEmpty, "\(style): a fill keeps the main harp part")
+            XCTAssertNotNil(style.bar(.a).harpMark(at: 0) ?? style.bar(.a).harpMark(at: 2)
+                            ?? style.bar(.a).harpMark(at: 4), "\(style) A plays near the start")
+        }
+        XCTAssertEqual(RhythmStyle.allCases.count, 16)
+        XCTAssertEqual(RhythmStyle.slowRock.stepsPerBar, 12, "12/8: four beats of triplets")
+        XCTAssertTrue(RhythmStyle.swing.swings)
+        XCTAssertEqual(HarpMark("C"), .chord(accent: true))
+        XCTAssertEqual(HarpMark("3"), .note(2))
+        XCTAssertNil(HarpMark("."))
     }
 
     /// The bars read once play exactly what the written patterns say.
@@ -133,6 +135,7 @@ final class RhythmTests: XCTestCase {
                     XCTAssertEqual(read.hits[step].map(\.note), written.hits(at: step).map(\.note), "\(style) \(step)")
                     XCTAssertEqual(read.bass[step]?.degree, written.bassNote(at: step)?.degree)
                     XCTAssertEqual(read.bass[step]?.steps, written.bassNote(at: step)?.steps)
+                    XCTAssertEqual(read.harp[step], written.harpMark(at: step))
                 }
             }
         }

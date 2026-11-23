@@ -4,7 +4,7 @@ import CoreGraphics
 
 /// The pads, the 7 modifier and the strum plate.
 final class PadTests: XCTestCase {
-    private let c = MajorKey(tonic: 0)
+    private let c = MusicKey(tonic: 0)
 
     func testThePadsPlayTheSixChordsOfTheKey() {
         var names: [String] = []
@@ -86,7 +86,7 @@ final class PadTests: XCTestCase {
         var selection = PadSelection()
         selection.press(.seven)
         selection.press(.five)
-        let f = MajorKey(tonic: 5)
+        let f = MusicKey(tonic: 5)
         XCTAssertEqual(selection.chord(in: f)?.name(preferFlats: f.prefersFlats), "C7")
         selection.release(.five)
         selection.press(.four)
@@ -147,27 +147,27 @@ final class StrumPlateTests: XCTestCase {
     func testThreeOctavesOfAChordRootToRoot() {
         let strings = StrumPlate.defaultStrings
         XCTAssertEqual(strings, 10)
-        let c = MajorKey(tonic: 0)
+        let c = MusicKey(tonic: 0)
         let notes = StrumPlate.notes(for: c.chord(degree: 1), strings: strings,
                                      from: StrumPlate.lowestNote(in: c))
         XCTAssertEqual(notes, [48, 52, 55, 60, 64, 67, 72, 76, 79, 84], "C3 up to C6")
     }
 
     func testOtherChordsStartFromTheirFirstNoteAboveTheBottom() {
-        let c = MajorKey(tonic: 0)
+        let c = MusicKey(tonic: 0)
         let g = StrumPlate.notes(for: c.chord(degree: 5), strings: 4, from: 48)
         XCTAssertEqual(g, [50, 55, 59, 62], "D G B D: the plate stays in place")
     }
 
     func testTheSeventhAddsNotesOnTheSameStrings() {
-        let c = MajorKey(tonic: 0)
+        let c = MusicKey(tonic: 0)
         let notes = StrumPlate.notes(for: c.chord(degree: 1).withSeventh, strings: 10, from: 48)
         XCTAssertEqual(notes.count, 10)
         XCTAssertEqual(Array(notes.prefix(5)), [48, 52, 55, 58, 60], "B♭ joins in")
     }
 
     func testThePlateFollowsTheKey() {
-        XCTAssertEqual(StrumPlate.lowestNote(in: MajorKey(tonic: 7)), 55, "G3 in G")
+        XCTAssertEqual(StrumPlate.lowestNote(in: MusicKey(tonic: 7)), 55, "G3 in G")
     }
 
     func testStringsByHeight() {
@@ -196,11 +196,11 @@ final class StrumPlateTests: XCTestCase {
     }
 
     func testTheOctaveButtonsMoveThePlate() {
-        let c = MajorKey(tonic: 0)
+        let c = MusicKey(tonic: 0)
         XCTAssertEqual(StrumPlate.lowestNote(in: c, octaveShift: -1), 36, "C2")
         XCTAssertEqual(StrumPlate.lowestNote(in: c, octaveShift: 2), 72, "C5")
         let high = StrumPlate.notes(for: c.chord(degree: 1), strings: 16,
-                                    from: StrumPlate.lowestNote(in: MajorKey(tonic: 11), octaveShift: 2))
+                                    from: StrumPlate.lowestNote(in: MusicKey(tonic: 11), octaveShift: 2))
         XCTAssertTrue(high.allSatisfy { $0 <= 127 }, "never past the top of MIDI")
     }
 
@@ -226,7 +226,7 @@ final class StrumPlateTests: XCTestCase {
         var setup = HarpSetup()
         setup.keyTonic = 7
         let data = try JSONEncoder().encode(setup)
-        XCTAssertEqual(try SetupStorage.decode(data).key, MajorKey(tonic: 7))
+        XCTAssertEqual(try SetupStorage.decode(data).key, MusicKey(tonic: 7))
         let bad = Data(#"{"keyTonic": 40}"#.utf8)
         XCTAssertEqual(try SetupStorage.decode(bad).keyTonic, 0)
     }

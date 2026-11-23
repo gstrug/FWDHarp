@@ -8,12 +8,18 @@ import Foundation
 /// figure uses the plate's lowest strings: the chord once through plus the root on
 /// top (C E G C; with the 7th, C E G B♭ C), or twice through for the 2-octave ones.
 nonisolated enum AutoStrumPattern: String, CaseIterable, Codable {
+    /// The rhythm style's own harp part (Graham, 2026-11-23), as an arranger keyboard's
+    /// accompaniment comes with its style: oom-pah-pah for the waltz, off-beat chords
+    /// for reggae and so on (RhythmBar.harp). It plays in the style's metre and feel
+    /// whether or not the drums are running.
+    case style
     case arpeggioUp, arpeggioDown, arpeggioUpDown
     case arpeggio2Up, arpeggio2Down, arpeggio2UpDown
     case blockChords, bassAndChord, singleSweep
 
     var title: String {
         switch self {
+        case .style: return "Style"
         case .arpeggioUp: return "Arpeggio Up"
         case .arpeggioDown: return "Arpeggio Down"
         case .arpeggioUpDown: return "Arpeggio Up-Down"
@@ -33,6 +39,8 @@ nonisolated enum AutoStrumPattern: String, CaseIterable, Codable {
         case .arpeggioUp, .arpeggioDown, .arpeggioUpDown,
              .arpeggio2Up, .arpeggio2Down, .arpeggio2UpDown: return 2
         case .blockChords, .bassAndChord: return 1
+        // The style's own grid, sixteenths or triplets: the conductor steps it.
+        case .style: return 4
         case .singleSweep: return 0
         }
     }
@@ -69,60 +77,74 @@ nonisolated enum AutoStrum {
         StrumPlate.bass(of: Chord(root: root, quality: .major), below: plateNotes)
     }
 
-    /// The arpeggio figure with the scale's colour (Graham, 2026-11-21): between each
-    /// pair of chord notes, the scale note just below the upper one, if there is one,
-    /// as a passing note leading into it. Over C with C blues: C E♭ E G A C (the blue
-    /// note slides into E); with the major scale: C D E F G B C. The chord stays in
-    /// charge: never more than one passing note between two chord notes.
-    static func colouredFigure(_ figure: [Int], scale: Set<Int>) -> [Int] {
-        guard figure.count > 1 else { return figure }
-        var result = [figure[0]]
-        for (low, high) in zip(figure, figure.dropFirst()) {
-            if let passing = stride(from: high - 1, to: low, by: -1)
+    /// An arpeggio with a pentatonic's colour (2026-11-23): between two chord notes a
+    /// third to a fifth apart, the pentatonic note next to the second, leading into it
+    /// (C D E G A C going up). A pentatonic's notes never clash with the chord, so they
+    /// may fall anywhere; the round is kept to an even length, so the pattern lines up
+    /// with the beat every time round instead of drifting across it (with an odd one,
+    /// what was on the off-beat lands on the beat the next time).
+    static func coloured(_ sequence: [Int], scale: Set<Int>) -> [Int] {
+        guard sequence.count > 1 else { return sequence }
+        var result: [Int] = []
+        var lastPassing: Int?
+        for (i, note) in sequence.enumerated() {
+            result.append(note)
+            let next = sequence[(i + 1) % sequence.count]
+            let gap = next - note
+            guard abs(gap) >= 3, abs(gap) <= 7 else { continue }
+            // The scale note nearest `next` on this side of it.
+            let step = gap > 0 ? -1 : 1
+            if let passing = stride(from: next + step, to: note, by: step)
                 .first(where: { scale.contains((($0 % 12) + 12) % 12) }) {
+                lastPassing = result.count
                 result.append(passing)
             }
-            result.append(high)
         }
+        if result.count % 2 == 1, let index = lastPassing { result.remove(at: index) }
         return result
     }
 
     /// The notes started at `step` (counted from 0 when the pattern starts). Each
-    /// step's notes are released when the next step starts. With a `scale` chosen on
-    /// the plate, the arpeggios take its colour (colouredFigure); the chord patterns
-    /// stay chords.
+    /// step's notes are released when the next step starts.
     static func notes(_ pattern: AutoStrumPattern, step: Int, plateNotes: [Int], chord: Chord,
-                      scale: Set<Int>? = nil) -> [Int] {
-        let steps = cycle(pattern, plateNotes: plateNotes, chord: chord, scale: scale)
+                      scale: Set<Int>? = nil, beatsPerBar: Int = 4) -> [Int] {
+        let steps = cycle(pattern, plateNotes: plateNotes, chord: chord, scale: scale, beatsPerBar: beatsPerBar)
         return steps.isEmpty ? [] : steps[step % steps.count]
     }
 
     /// Every step of the pattern for this chord, once round: the step played at `n` is
     /// `cycle[n % cycle.count]`. Worked out once when the chord changes, so each step is
-    /// a lookup (code review, 2026-11-23).
+    /// a lookup (code review, 2026-11-23). `scale`: a pentatonic's notes, for the
+    /// arpeggios' passing notes (PlateScale.autoStrumColour); the chord patterns stay
+    /// chords. `beatsPerBar`: 3 makes Bass + Chord an oom-pah-pah.
     static func cycle(_ pattern: AutoStrumPattern, plateNotes: [Int], chord: Chord,
-                      scale: Set<Int>? = nil) -> [[Int]] {
-        let plain = figure(plateNotes: plateNotes, chordSize: chord.pitchClasses.count,
-                           octaves: pattern.octaves)
-        let isArpeggio = pattern.stepsPerBeat == 2
-        let figure = isArpeggio ? scale.map { colouredFigure(plain, scale: $0) } ?? plain : plain
+                      scale: Set<Int>? = nil, beatsPerBar: Int = 4) -> [[Int]] {
+        let figure = figure(plateNotes: plateNotes, chordSize: chord.pitchClasses.count,
+                            octaves: pattern.octaves)
         guard !figure.isEmpty else { return [] }
+        func arpeggio(_ sequence: [Int]) -> [[Int]] {
+            (scale.map { coloured(sequence, scale: $0) } ?? sequence).map { [$0] }
+        }
         switch pattern {
         case .arpeggioUp, .arpeggio2Up:
-            return figure.map { [$0] }
+            return arpeggio(figure)
         case .arpeggioDown, .arpeggio2Down:
-            return figure.reversed().map { [$0] }
+            return arpeggio(figure.reversed())
         case .arpeggioUpDown, .arpeggio2UpDown:
             // Up and back down without repeating the top and bottom: C E G C G E | C …
-            return (figure + figure.dropFirst().dropLast().reversed()).map { [$0] }
+            return arpeggio(figure + figure.dropFirst().dropLast().reversed())
         case .blockChords:
             return [figure]
         case .bassAndChord:
-            // Oom-pah: bass on beats 1 and 3 (root, then 5th), chord on 2 and 4.
+            // Oom-pah: bass on 1 and 3 (root, then 5th), chord on 2 and 4. In 3/4 an
+            // oom-pah-pah over two bars: root, chord, chord; 5th, chord, chord.
             guard let bass = bass(plateNotes: plateNotes, root: chord.root) else { return [figure] }
             let chordPart = Array(figure.dropLast())
+            if beatsPerBar == 3 {
+                return [[bass.root], chordPart, chordPart, [bass.fifth], chordPart, chordPart]
+            }
             return [[bass.root], chordPart, [bass.fifth], chordPart]
-        case .singleSweep:
+        case .singleSweep, .style:
             return []
         }
     }

@@ -226,8 +226,9 @@ final class InstrumentStore: ObservableObject {
 
     // MARK: - Settings
 
-    func setKey(_ key: MajorKey) {
+    func setKey(_ key: MusicKey) {
         setup.keyTonic = key.tonic
+        setup.keyMinor = key.isMinor
     }
 
     func setPlateStrings(_ strings: Int) {
