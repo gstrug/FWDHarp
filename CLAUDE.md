@@ -306,3 +306,10 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   per style A/B/intro/outro, played by Conductor.playStyleAutoLocked on the style's
   grid, with or without drums; outro's final hit includes the chord. 16 styles: +swing,
   slowRock (12/8, triplets), march, funk, hipHop, samba, tango.
+- 2026-11-23: plate slide + retune. Finger tracking moved into HarpPlayer
+  (touchBegan/Moved/Ended, PlateTouch: string, note, loudness, anchor). Sideways slide
+  sends CC11 expression on the plate (NoteRouter.controller → engine + MIDI out):
+  110 at touch-down, ±120 × slide across the plate, 30–127; back to 110 1.5 s after the
+  last finger lifts; PANIC sends 127. Note: auto-strum without its own sound shares
+  the plate's instrument, so the slide moves it too. syncAutoStrum also calls
+  retuneHeldStrings: held strings re-strike their note in the new chord.
