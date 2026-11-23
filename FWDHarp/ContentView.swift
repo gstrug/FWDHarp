@@ -138,10 +138,9 @@ private struct KeyMenu: View {
     @ObservedObject var player: HarpPlayer
 
     var body: some View {
-        // Major keys, then minor keys (Graham, 2026-11-23).
+        // The twelve keys of the kind chosen under it, major or minor.
         Menu {
-            Section("Major") { keys(MusicKey.all.filter { !$0.isMinor }) }
-            Section("Minor") { keys(MusicKey.all.filter(\.isMinor)) }
+            keys(MusicKey.all.filter { $0.isMinor == player.key.isMinor })
         } label: {
             HStack(spacing: 6) {
                 Text("KEY")
@@ -162,9 +161,29 @@ private struct KeyMenu: View {
             Button {
                 player.setKey(key)
             } label: {
-                if key == player.key { Label(key.fullName, systemImage: "checkmark") } else { Text(key.fullName) }
+                if key == player.key { Label(key.name, systemImage: "checkmark") } else { Text(key.name) }
             }
         }
+    }
+}
+
+/// MAJ or MIN, under KEY: the same key note, major or minor (C to Cm).
+private struct KeyModeToggle: View {
+    @ObservedObject var player: HarpPlayer
+
+    var body: some View {
+        HStack(spacing: 6) {
+            chip("MAJ", minor: false)
+            chip("MIN", minor: true)
+        }
+    }
+
+    private func chip(_ title: String, minor: Bool) -> some View {
+        StudioToggleChip(title: title,
+                         isOn: Binding(get: { player.key.isMinor == minor },
+                                       set: { _ in player.setKey(MusicKey(tonic: player.key.tonic, minor: minor)) }),
+                         tint: StudioStyle.displayText,
+                         accessibilityLabel: minor ? "Minor key" : "Major key")
     }
 }
 
@@ -245,6 +264,11 @@ private struct PlateControls: View {
                         check(ring.title, ring == player.plateRing) { player.setPlateRing(ring) }
                     }
                 }
+            }
+            // Major or minor, right under KEY (Graham, 2026-11-23: one list of all 24
+            // keys was hard to find a way around).
+            GridRow {
+                KeyModeToggle(player: player)
             }
             GridRow {
                 ScaleMenu(player: player)
