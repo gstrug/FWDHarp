@@ -313,3 +313,5 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   last finger lifts; PANIC sends 127. Note: auto-strum without its own sound shares
   the plate's instrument, so the slide moves it too. syncAutoStrum also calls
   retuneHeldStrings: held strings re-strike their note in the new chord.
+- 2026-11-23: KEY menu lists the 12 keys of the current mode; MAJ / MIN chips
+  (KeyModeToggle) in their own row under KEY switch mode, keeping the tonic.
