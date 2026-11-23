@@ -314,4 +314,4 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   the plate's instrument, so the slide moves it too. syncAutoStrum also calls
   retuneHeldStrings: held strings re-strike their note in the new chord.
 - 2026-11-23: KEY menu lists the 12 keys of the current mode; MAJ / MIN chips
-  (KeyModeToggle) in their own row under KEY switch mode, keeping the tonic.
+  (KeyModeToggle) beside KEY in the same grid cell (a row of its own made the plate shorter), keeping the tonic.
