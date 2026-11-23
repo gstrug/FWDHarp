@@ -292,3 +292,17 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   only while on. Removed unused: AutoStrum.stepInterval, PlateScale.followsChord,
   engine currentStatus/quietTelemetry/telemetrySuppressed/ensureRunning/hasInstrument.
   Build has no warnings.
+- 2026-11-23: scales reworked after Graham found some "off" (research: arranger
+  keyboards' per-part chord rules, chord harps' chord-only plate, avoid notes).
+  MajorKey → `MusicKey` (tonic + isMinor; HarpSetup.keyMinor). Minor pads: iv i V
+  (V major) / VI III VII (ChordPad.chord(in:), degreeLabel(in:)). PlateScale: chord,
+  major ("Melody"), pentatonic, minorPentatonic, blues — all follow the chord via
+  `fitted` (drop notes a semitone above a chord tone, or below a chord tone the key
+  lacks; sus4 drops the 3rd); naturalMinor and chromatic removed (decode → chord).
+  Scale plates start on the first chord tone ≥ the plate's bottom. Auto-strum colour
+  only for the pentatonics (AutoStrum.coloured, even-length rounds); Bass + Chord in
+  3/4 = oom-pah-pah (cycle(beatsPerBar:), from the chosen style). AutoStrumPattern
+  .style (default for new setups): RhythmBar.harp lines (. - c C u R 5 1–4, HarpMark)
+  per style A/B/intro/outro, played by Conductor.playStyleAutoLocked on the style's
+  grid, with or without drums; outro's final hit includes the chord. 16 styles: +swing,
+  slowRock (12/8, triplets), march, funk, hipHop, samba, tango.
