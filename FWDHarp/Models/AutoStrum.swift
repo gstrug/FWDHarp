@@ -93,6 +93,15 @@ nonisolated enum AutoStrum {
     /// stay chords.
     static func notes(_ pattern: AutoStrumPattern, step: Int, plateNotes: [Int], chord: Chord,
                       scale: Set<Int>? = nil) -> [Int] {
+        let steps = cycle(pattern, plateNotes: plateNotes, chord: chord, scale: scale)
+        return steps.isEmpty ? [] : steps[step % steps.count]
+    }
+
+    /// Every step of the pattern for this chord, once round: the step played at `n` is
+    /// `cycle[n % cycle.count]`. Worked out once when the chord changes, so each step is
+    /// a lookup (code review, 2026-11-23).
+    static func cycle(_ pattern: AutoStrumPattern, plateNotes: [Int], chord: Chord,
+                      scale: Set<Int>? = nil) -> [[Int]] {
         let plain = figure(plateNotes: plateNotes, chordSize: chord.pitchClasses.count,
                            octaves: pattern.octaves)
         let isArpeggio = pattern.stepsPerBeat == 2
@@ -100,34 +109,22 @@ nonisolated enum AutoStrum {
         guard !figure.isEmpty else { return [] }
         switch pattern {
         case .arpeggioUp, .arpeggio2Up:
-            return [figure[step % figure.count]]
+            return figure.map { [$0] }
         case .arpeggioDown, .arpeggio2Down:
-            let down = Array(figure.reversed())
-            return [down[step % down.count]]
+            return figure.reversed().map { [$0] }
         case .arpeggioUpDown, .arpeggio2UpDown:
             // Up and back down without repeating the top and bottom: C E G C G E | C …
-            let cycle = figure + figure.dropFirst().dropLast().reversed()
-            return [cycle[step % cycle.count]]
+            return (figure + figure.dropFirst().dropLast().reversed()).map { [$0] }
         case .blockChords:
-            return figure
+            return [figure]
         case .bassAndChord:
             // Oom-pah: bass on beats 1 and 3 (root, then 5th), chord on 2 and 4.
-            guard let bass = bass(plateNotes: plateNotes, root: chord.root) else { return figure }
-            switch step % 4 {
-            case 0: return [bass.root]
-            case 2: return [bass.fifth]
-            default: return Array(figure.dropLast())
-            }
+            guard let bass = bass(plateNotes: plateNotes, root: chord.root) else { return [figure] }
+            let chordPart = Array(figure.dropLast())
+            return [[bass.root], chordPart, [bass.fifth], chordPart]
         case .singleSweep:
             return []
         }
-    }
-
-    /// Seconds between steps at `tempo` beats a minute.
-    static func stepInterval(_ pattern: AutoStrumPattern, tempo: Double) -> Double {
-        guard pattern.isRhythmic else { return 0 }
-        let bpm = min(max(tempo, tempoRange.lowerBound), tempoRange.upperBound)
-        return 60 / bpm / Double(pattern.stepsPerBeat)
     }
 }
 

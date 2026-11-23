@@ -241,8 +241,13 @@ final class MIDIControlCenter: ObservableObject {
     private func handle(_ batch: [(MIDIInputManager.Source, MIDIControlMessage)]) {
         guard !batch.isEmpty else { return }
 
+        // The activity lights need a new time only every tenth of a second: setting it
+        // for every batch redrew whatever watches this object for every key played.
         let now = Date()
-        for name in Set(batch.map { $0.0.name }) { lastActivity[name] = now }
+        for name in Set(batch.map { $0.0.name })
+        where lastActivity[name].map({ now.timeIntervalSince($0) > 0.1 }) ?? true {
+            lastActivity[name] = now
+        }
 
         // A continuous control only needs its LAST position in a batch; buttons are
         // handled in order, every press and release, so none is lost.
@@ -343,7 +348,7 @@ final class MIDIControlCenter: ObservableObject {
     /// the chord as a finger does.
     private func applyButton(_ target: MIDIControlTarget, pressed: Bool) {
         guard let player = activePlayer else { return }
-        if case .pad(let pad) = target {
+        if target.hearsRelease, case .pad(let pad) = target {
             if pressed { player.press(pad) } else { player.release(pad) }
             return
         }

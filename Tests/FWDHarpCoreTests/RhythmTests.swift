@@ -119,4 +119,22 @@ final class RhythmTests: XCTestCase {
                                               scale: PlateScale.blues.autoStrumColour(in: c, chord: cMajor)!)
         XCTAssertEqual(figure, [48, 51, 52, 54, 55, 58, 60])
     }
+
+    /// The bars read once play exactly what the written patterns say.
+    func testCompiledBarsMatchThePatterns() {
+        for style in RhythmStyle.allCases {
+            let compiled = style.compiled
+            for (written, read) in [(style.bar(.a), compiled.a), (style.bar(.b), compiled.b),
+                                    (style.fill, compiled.fill), (style.intro, compiled.intro),
+                                    (style.outro, compiled.outro)] {
+                XCTAssertEqual(read.hits.count, style.stepsPerBar)
+                XCTAssertEqual(read.hasBass, !written.bass.isEmpty)
+                for step in 0..<style.stepsPerBar {
+                    XCTAssertEqual(read.hits[step].map(\.note), written.hits(at: step).map(\.note), "\(style) \(step)")
+                    XCTAssertEqual(read.bass[step]?.degree, written.bassNote(at: step)?.degree)
+                    XCTAssertEqual(read.bass[step]?.steps, written.bassNote(at: step)?.steps)
+                }
+            }
+        }
+    }
 }

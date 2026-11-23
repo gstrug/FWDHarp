@@ -47,6 +47,8 @@ struct ContentView: View {
         .sheet(isPresented: $showMIDI) { MIDISettingsView(player: player) }
         // MIDI in: controllers, MIDI Learn and the clock, for this harp.
         .onAppear { MIDIControlCenter.shared.start(player: player) }
+        // The meters are only in the mixer: they measure only while it is open.
+        .onChange(of: showMixer) { store.setMetersShown($0) }
         .loadingOverlay(store)
         // A safe moment to keep the instruments' sounds and save (FWD lesson 3).
         .onChange(of: scenePhase) { phase in
@@ -473,16 +475,19 @@ private struct RhythmControls: View {
                 .opacity(!running || player.rhythm.intro || player.rhythm.outro ? 0.45 : 1)
                 .accessibilityLabel("Fill to the end of the bar")
                 .midiLearnable(.fill)
-            BeatLights(position: player.rhythm, beats: player.rhythmStyle.beatsPerBar)
+            BeatLights(clock: player.beatClock, beats: player.rhythmStyle.beatsPerBar)
             Spacer(minLength: 0)
         }
     }
 }
 
-/// A light per beat of the bar: the one playing lit, the first brighter.
+/// A light per beat of the bar: the one playing lit, the first brighter. Watches the
+/// beat clock alone, so only the lights redraw each beat.
 private struct BeatLights: View {
-    let position: RhythmPosition
+    @ObservedObject var clock: BeatClock
     let beats: Int
+
+    private var position: RhythmPosition { clock.position }
 
     var body: some View {
         HStack(spacing: 5) {

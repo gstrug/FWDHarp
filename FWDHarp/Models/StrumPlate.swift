@@ -180,8 +180,6 @@ nonisolated enum PlateScale: String, CaseIterable, Codable {
         }
     }
 
-    var followsChord: Bool { self == .pentatonic || self == .blues }
-
     /// Semitones above the scale's root; nil for Chord. `minor` picks the minor form of
     /// the scales that follow the chord.
     func intervals(minor: Bool = false) -> [Int]? {

@@ -164,17 +164,26 @@ private struct PartMeter: View {
     }
 }
 
-/// Everything together, as FWD's master strip.
+private struct MasterMeter: View {
+    @ObservedObject var levels: LevelMonitor
+
+    var body: some View {
+        SegmentedMeter(level: levels.masterLevel, segments: 18)
+    }
+}
+
+/// Everything together, as FWD's master strip. Only its meter watches the levels,
+/// so the meter alone redraws 20 times a second, not the fader with it.
 private struct MasterStrip: View {
     @ObservedObject var store: InstrumentStore
-    @ObservedObject var levels: LevelMonitor
+    let levels: LevelMonitor
 
     var body: some View {
         VStack(spacing: StripSize.spacing) {
             StripName(title: "MASTER")
             FaderWithMeter(value: Binding(get: { store.setup.masterVolume }, set: { store.setMasterVolume($0) }),
                            accessibilityLabel: "Master volume") {
-                SegmentedMeter(level: levels.masterLevel, segments: 18)
+                MasterMeter(levels: levels)
             }
             .midiLearnable(.masterVolume)
             Text("Vol").font(.caption2).foregroundStyle(.secondary)

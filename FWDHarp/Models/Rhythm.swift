@@ -40,7 +40,8 @@ nonisolated struct RhythmBar: Equatable {
             guard let mark = Self.mark(in: line, at: step), let velocity = Self.velocity(mark) else { return nil }
             return (voice.note, velocity)
         }
-        .sorted { $0.velocity > $1.velocity }
+        // Loudest first; the same order every time (a dictionary has none of its own).
+        .sorted { $0.velocity != $1.velocity ? $0.velocity > $1.velocity : $0.note < $1.note }
     }
 
     /// A bass note starting at `step`: which note of the chord, and for how many steps.
@@ -56,6 +57,51 @@ nonisolated struct RhythmBar: Equatable {
         let characters = Array(line)
         return characters.indices.contains(step) ? characters[step] : nil
     }
+}
+
+/// A bar read once into what the clock needs at each step, so playing it is a lookup:
+/// the drums struck (loudest first) and the bass note starting, if any. Reading the
+/// pattern's text on every step, as at first, made new arrays several times a step on
+/// the clock's thread (code review, 2026-11-23).
+nonisolated struct CompiledRhythmBar {
+    let hits: [[(note: UInt8, velocity: UInt8)]]
+    let bass: [(degree: Character, steps: Int)?]
+    /// False for a fill without a bass line of its own: the main bar's bass plays.
+    let hasBass: Bool
+
+    init(_ bar: RhythmBar, steps: Int) {
+        hits = (0..<steps).map { bar.hits(at: $0) }
+        bass = (0..<steps).map { bar.bassNote(at: $0) }
+        hasBass = !bar.bass.isEmpty
+    }
+}
+
+/// Every bar of a style, read once.
+nonisolated struct CompiledRhythmStyle {
+    let a: CompiledRhythmBar
+    let b: CompiledRhythmBar
+    let fill: CompiledRhythmBar
+    let intro: CompiledRhythmBar
+    let outro: CompiledRhythmBar
+
+    init(_ style: RhythmStyle) {
+        let steps = style.stepsPerBar
+        a = CompiledRhythmBar(style.bar(.a), steps: steps)
+        b = CompiledRhythmBar(style.bar(.b), steps: steps)
+        fill = CompiledRhythmBar(style.fill, steps: steps)
+        intro = CompiledRhythmBar(style.intro, steps: steps)
+        outro = CompiledRhythmBar(style.outro, steps: steps)
+    }
+
+    func bar(_ variation: RhythmVariation) -> CompiledRhythmBar { variation == .a ? a : b }
+}
+
+extension RhythmStyle {
+    /// This style's bars, read once for the whole app the first time it is played.
+    nonisolated var compiled: CompiledRhythmStyle { Self.compiledStyles[self]! }
+
+    nonisolated private static let compiledStyles: [RhythmStyle: CompiledRhythmStyle] =
+        Dictionary(uniqueKeysWithValues: allCases.map { ($0, CompiledRhythmStyle($0)) })
 }
 
 nonisolated enum RhythmVariation: String, CaseIterable, Codable {

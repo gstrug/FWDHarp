@@ -21,15 +21,8 @@ struct StrumPlateView: View {
                         .stroke(LinearGradient(colors: [Color.black.opacity(0.9), Color.white.opacity(0.08)],
                                                startPoint: .top, endPoint: .bottom), lineWidth: 1))
 
-                ForEach(0..<count, id: \.self) { string in
-                    let band = size.height / CGFloat(count)
-                    let y = size.height - (CGFloat(string) + 0.5) * band
-                    StringLine(note: notes.indices.contains(string) ? notes[string] : nil,
-                               preferFlats: player.key.prefersFlats,
-                               isTouched: player.touchedStrings.contains(string))
-                        .frame(width: size.width, height: band)
-                        .position(x: size.width / 2, y: y)
-                }
+                PlateStrings(lights: player.plateLights, notes: notes, count: count,
+                             preferFlats: player.key.prefersFlats, size: size)
 
                 if notes.isEmpty {
                     Text("Hold a chord pad, then strum here")
@@ -105,8 +98,29 @@ private final class PlateTouches {
     }
 }
 
+/// The strings, lit under the fingers. Watches only the lights, so a strum redraws
+/// just the strings.
+private struct PlateStrings: View {
+    @ObservedObject var lights: PlateLights
+    let notes: [Int]
+    let count: Int
+    let preferFlats: Bool
+    let size: CGSize
+
+    var body: some View {
+        let band = size.height / CGFloat(max(count, 1))
+        ForEach(0..<count, id: \.self) { string in
+            StringLine(note: notes.indices.contains(string) ? notes[string] : nil,
+                       preferFlats: preferFlats,
+                       isTouched: lights.touched.contains(string))
+                .frame(width: size.width, height: band)
+                .position(x: size.width / 2, y: size.height - (CGFloat(string) + 0.5) * band)
+        }
+    }
+}
+
 /// One string: a line, its note's name at the left, lit while touched.
-private struct StringLine: View {
+private struct StringLine: View, Equatable {
     let note: Int?
     let preferFlats: Bool
     let isTouched: Bool

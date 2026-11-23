@@ -294,6 +294,16 @@ final class InstrumentStore: ObservableObject {
     // MARK: - Notes
 
     /// The plate's notes, from hand strumming: to its instrument and MIDI out.
+    /// Meters measure only while the mixer is open; closed, they are cleared so they
+    /// open again from silence rather than showing an old level.
+    func setMetersShown(_ shown: Bool) {
+        engine.metersShown = shown
+        if !shown {
+            levels.trackLevels = [:]
+            levels.masterLevel = .silent
+        }
+    }
+
     func noteOn(_ note: UInt8, velocity: UInt8 = 100) {
         router.play(.plate, note: note, velocity: velocity)
     }

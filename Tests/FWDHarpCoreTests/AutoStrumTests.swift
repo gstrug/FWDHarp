@@ -44,11 +44,27 @@ final class AutoStrumTests: XCTestCase {
         XCTAssertEqual(steps[2], [50])
     }
 
-    func testStepTimes() {
-        XCTAssertEqual(AutoStrum.stepInterval(.arpeggioUp, tempo: 120), 0.25, accuracy: 1e-9, "eighths")
-        XCTAssertEqual(AutoStrum.stepInterval(.blockChords, tempo: 120), 0.5, accuracy: 1e-9)
-        XCTAssertEqual(AutoStrum.stepInterval(.singleSweep, tempo: 120), 0)
-        XCTAssertEqual(AutoStrum.stepInterval(.blockChords, tempo: 1000), 0.25, accuracy: 1e-9, "held to 240")
+    /// Steps per beat: the conductor's grid (eighths, or a chord a beat).
+    func testStepsPerBeat() {
+        XCTAssertEqual(AutoStrumPattern.arpeggioUp.stepsPerBeat, 2, "eighths")
+        XCTAssertEqual(AutoStrumPattern.blockChords.stepsPerBeat, 1)
+        XCTAssertFalse(AutoStrumPattern.singleSweep.isRhythmic)
+    }
+
+    /// The cycle worked out once is the same as asking step by step.
+    func testCycleMatchesSteps() {
+        let g = c.chord(degree: 5)
+        let plate = StrumPlate.notes(for: g, strings: 10, from: StrumPlate.lowestNote(in: c, octaveShift: 0))
+        for pattern in AutoStrumPattern.allCases where pattern.isRhythmic {
+            for scale in [nil, PlateScale.blues.autoStrumColour(in: c, chord: g)] {
+                let cycle = AutoStrum.cycle(pattern, plateNotes: plate, chord: g, scale: scale)
+                XCTAssertFalse(cycle.isEmpty, "\(pattern)")
+                for step in 0..<20 {
+                    XCTAssertEqual(cycle[step % cycle.count],
+                                   AutoStrum.notes(pattern, step: step, plateNotes: plate, chord: g, scale: scale))
+                }
+            }
+        }
     }
 
     func testTapTempo() {

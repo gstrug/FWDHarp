@@ -99,7 +99,7 @@ nonisolated final class AudioEngineManager: @unchecked Sendable {
 
     /// Caller holds callbackLock.
     private var telemetryQuietLocked: Bool {
-        _telemetryPaused || _appInBackground || CACurrentMediaTime() < _telemetryQuietUntil
+        _telemetryPaused || _appInBackground || !_metersShown
     }
     var onLevelUpdate: ((UUID, AudioLevel) -> Void)? {
         get { withCallbackLock { _onLevelUpdate } }
@@ -127,7 +127,6 @@ nonisolated final class AudioEngineManager: @unchecked Sendable {
         get { withCallbackLock { _onRecoveryRequired } }
         set { withCallbackLock { _onRecoveryRequired = newValue } }
     }
-    var currentStatus: AudioEngineStatus { withCallbackLock { status } }
     private var _telemetryPaused = false
     /// Suspends VU metering and level callbacks. Set while a plugin's UI is being
     /// constructed: hosting an out-of-process AUv3 view is main-thread and CoreAnimation
@@ -140,25 +139,17 @@ nonisolated final class AudioEngineManager: @unchecked Sendable {
     /// The app is in the background: nothing is on screen, so meters are not measured
     /// and playback telemetry is not sent, while audio plays on exactly as before.
     private var _appInBackground = false
-    /// Telemetry is held off until this moment (CACurrentMediaTime), for a burst of
-    /// screen work such as a rotation. Self-expiring, so it can never be left on.
-    private var _telemetryQuietUntil: CFTimeInterval = 0
-
-    /// Hold meters and playback telemetry off for `seconds` — while the screen is being
-    /// laid out again after a rotation, so the meters are not competing with it for the
-    /// main thread. Audio and MIDI are unaffected.
-    func quietTelemetry(forSeconds seconds: Double) {
-        withCallbackLock { _telemetryQuietUntil = CACurrentMediaTime() + seconds }
-    }
-
-    /// Whether on-screen telemetry (meters, notes, steps) should be skipped right now —
-    /// a plugin UI is being built, the screen is being laid out again, or nobody can see it.
-    var telemetrySuppressed: Bool {
-        withCallbackLock { telemetryQuietLocked }
+    /// The meters are on screen. FWD Harp's meters are only in the mixer, so with it
+    /// closed nothing is measured or sent to the main thread (code review, 2026-11-23).
+    private var _metersShown = false
+    var metersShown: Bool {
+        get { withCallbackLock { _metersShown } }
+        set { withCallbackLock { _metersShown = newValue } }
     }
     private var sessionObservers: [NSObjectProtocol] = []
     /// Set once an effect load is settled, by the effect arriving or by its time limit.
-    private final class EffectLoadFlag { var isSet = false }
+    /// Only ever read and set on the main thread (see loadEffect), so it needs no lock.
+    private final class EffectLoadFlag: @unchecked Sendable { var isSet = false }
 
     private struct PluginLoadRequest {
         let id: UUID
@@ -343,27 +334,6 @@ nonisolated final class AudioEngineManager: @unchecked Sendable {
         } catch {
             setStatus(.failed(error.localizedDescription))
             return false
-        }
-    }
-
-    /// Make sure audio is running before playback starts.
-    ///
-    /// An interruption pauses the engine, and it is only restarted by itself when the
-    /// system says playback should resume. When it does not say so (the other audio
-    /// simply ended), the engine stayed paused and pressing Play was silent until the
-    /// song was reopened. Does nothing while the engine is running, which is every
-    /// ordinary press of Play. A failure here is left for the interruption handling to
-    /// report: this must never turn a silent Play into an error message.
-    func ensureRunning() {
-        withLock {
-            guard !engine.isRunning, !trackMixers.isEmpty else { return }
-            do {
-                try AVAudioSession.sharedInstance().setActive(true)
-                try engine.start()
-                setStatus(.ready)
-            } catch {
-                NSLog("[FWD] Audio could not be restarted before playing: %@", error.localizedDescription)
-            }
         }
     }
 
@@ -731,10 +701,6 @@ nonisolated final class AudioEngineManager: @unchecked Sendable {
             engine.disconnectNodeOutput(unit)
             engine.detach(unit)
         }
-    }
-
-    func hasInstrument(for id: UUID) -> Bool {
-        withLock { auv3Units[id] != nil || samplers[id] != nil }
     }
 
     func removeTrack(id: UUID) {

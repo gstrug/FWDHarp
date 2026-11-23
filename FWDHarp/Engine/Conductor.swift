@@ -49,6 +49,9 @@ nonisolated final class Conductor: @unchecked Sendable {
     private var plateNotes: [Int] = []
     private var scale: Set<Int>?
     private var autoSounding: [UInt8] = []
+    /// The pattern's steps for the chord held, worked out when the chord, plate,
+    /// scale or pattern change, so each step is a lookup.
+    private var autoCycle: [[UInt8]] = []
     /// Bumped to cancel a single sweep in progress.
     private var sweepGeneration: UInt64 = 0
 
@@ -115,6 +118,7 @@ nonisolated final class Conductor: @unchecked Sendable {
             self.plateNotes = plateNotes
             self.scale = scale
             if let chord { bassChord = chord }
+            rebuildAutoCycleLocked()
             if autoEnabled {
                 if chord == nil {
                     releaseAutoLocked()
@@ -161,6 +165,7 @@ nonisolated final class Conductor: @unchecked Sendable {
         locked {
             guard newPattern != pattern else { return }
             pattern = newPattern
+            rebuildAutoCycleLocked()
             releaseAutoLocked()
             autoOriginTick = alignedTickLocked(step: autoStepTicks)
             ensureClockLocked()
@@ -481,11 +486,8 @@ nonisolated final class Conductor: @unchecked Sendable {
                 outroBar = nil
                 crashNext = false
                 endTick = tick + 2 * Self.ticksPerBeat
-                for (note, velocity) in [(DrumVoice.crash.note, UInt8(118)), (DrumVoice.kick.note, UInt8(118))] {
-                    router.stop(.drums, note: note)
-                    router.play(.drums, note: note, velocity: velocity)
-                    drumsSounding.append((note, tick + Self.ticksPerBeat))
-                }
+                strikeLocked(DrumVoice.crash.note, velocity: 118, releaseTick: tick + Self.ticksPerBeat)
+                strikeLocked(DrumVoice.kick.note, velocity: 118, releaseTick: tick + Self.ticksPerBeat)
                 if let chord = bassChord {
                     releaseBassLocked()
                     let midi = UInt8(RhythmBass.root(of: chord))
@@ -510,32 +512,32 @@ nonisolated final class Conductor: @unchecked Sendable {
         let ticksPerStep = Self.ticksPerBeat / style.stepsPerBeat
         guard tickInBar % ticksPerStep == 0 else { return }
         let step = tickInBar / ticksPerStep
-        let main = style.bar(variation)
-        let bars: RhythmBar
+        // Looked up in the style's bars, read once (CompiledRhythmStyle).
+        let compiled = style.compiled
+        let main = compiled.bar(variation)
+        let bars: CompiledRhythmBar
         if introActive {
-            bars = style.intro
+            bars = compiled.intro
         } else if let last = outroBar, last == bar {
-            bars = style.outro
+            bars = compiled.outro
         } else if let fill = fillBar, fill == bar, step >= fillFromStep {
-            bars = style.fill
+            bars = compiled.fill
         } else {
             bars = main
         }
+        guard bars.hits.indices.contains(step) else { return }
 
-        var hits = bars.hits(at: step)
         if crashNext, step == 0 {
-            hits.insert((DrumVoice.crash.note, 110), at: 0)
+            strikeLocked(DrumVoice.crash.note, velocity: 110, releaseTick: tick + ticksPerStep)
             crashNext = false
         }
-        for hit in hits {
-            router.stop(.drums, note: hit.note)
-            router.play(.drums, note: hit.note, velocity: hit.velocity)
-            drumsSounding.append((hit.note, tick + ticksPerStep))
+        for hit in bars.hits[step] {
+            strikeLocked(hit.note, velocity: hit.velocity, releaseTick: tick + ticksPerStep)
         }
 
         // The bass follows the chord held, or the last one; it waits for a first chord.
-        let bassLine = bars.bass.isEmpty ? main : bars
-        if let event = bassLine.bassNote(at: step), let chord = bassChord,
+        let bassLine = bars.hasBass ? bars : main
+        if let event = bassLine.bass[step], let chord = bassChord,
            let note = RhythmBass.note(event.degree, over: chord), (0...127).contains(note) {
             releaseBassLocked()
             let midi = UInt8(note)
@@ -544,8 +546,21 @@ nonisolated final class Conductor: @unchecked Sendable {
         }
     }
 
+    private func rebuildAutoCycleLocked() {
+        guard let chord, pattern.isRhythmic else { autoCycle = []; return }
+        autoCycle = AutoStrum.cycle(pattern, plateNotes: plateNotes, chord: chord, scale: scale)
+            .map { step in step.filter { (0...127).contains($0) }.map { UInt8($0) } }
+    }
+
+    /// One drum hit, released at `releaseTick`.
+    private func strikeLocked(_ note: UInt8, velocity: UInt8, releaseTick: Int) {
+        router.stop(.drums, note: note)
+        router.play(.drums, note: note, velocity: velocity)
+        drumsSounding.append((note, releaseTick))
+    }
+
     private func playAutoLocked(_ tick: Int) {
-        guard autoEnabled, let chord, pattern.isRhythmic else { return }
+        guard autoEnabled, chord != nil, pattern.isRhythmic else { return }
         let origin = rhythmOn ? rhythmStartTick : autoOriginTick
         let at = tick - origin
         guard at >= 0 else { return }
@@ -562,9 +577,8 @@ nonisolated final class Conductor: @unchecked Sendable {
             step = beat * 2 + (beatTick == 0 ? 0 : 1)
         }
         releaseAutoLocked()
-        let notes = AutoStrum.notes(pattern, step: step, plateNotes: plateNotes, chord: chord, scale: scale)
-            .filter { (0...127).contains($0) }
-            .map { UInt8($0) }
+        guard !autoCycle.isEmpty else { return }
+        let notes = autoCycle[step % autoCycle.count]
         for note in notes {
             // Released first: the plate may be sounding it on the same instrument.
             router.stop(.auto, note: note)

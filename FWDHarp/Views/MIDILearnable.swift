@@ -85,33 +85,41 @@ struct MIDILearnOverlay: View {
 /// can be linked but have no control of their own on screen.
 struct MIDILearnBanner: View {
     @ObservedObject private var learn = MIDIControlCenter.shared.learn
+
+    var body: some View {
+        // The strip itself watches the control centre (for "no controller connected"),
+        // and only while Learn is on: otherwise it would redraw with every MIDI message.
+        if learn.isOn { MIDILearnStrip(learn: learn) }
+    }
+}
+
+private struct MIDILearnStrip: View {
+    @ObservedObject var learn: MIDILearnState
     @ObservedObject private var center = MIDIControlCenter.shared
 
     var body: some View {
-        if learn.isOn {
-            HStack(spacing: 12) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .foregroundStyle(.orange)
-                Text(instruction)
-                    .font(.caption)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(spacing: 12) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .foregroundStyle(.orange)
+            Text(instruction)
+                .font(.caption)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                // The style menu can't be tapped in Learn mode, so stepping through the
-                // styles gets buttons here, only to be linked.
-                learnChip("◀ Style", .previousStyle)
-                learnChip("Style ▶", .nextStyle)
-                learnChip("Drums Stop", .rhythmStop)
+            // The style menu can't be tapped in Learn mode, so stepping through the
+            // styles gets buttons here, only to be linked.
+            learnChip("◀ Style", .previousStyle)
+            learnChip("Style ▶", .nextStyle)
+            learnChip("Drums Stop", .rhythmStop)
 
-                Button("Done") { learn.isOn = false }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.orange)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 6)
-            .background(Color.orange.opacity(0.12))
-            .overlay(alignment: .bottom) { Divider() }
+            Button("Done") { learn.isOn = false }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 6)
+        .background(Color.orange.opacity(0.12))
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var instruction: String {

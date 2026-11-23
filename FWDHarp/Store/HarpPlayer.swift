@@ -16,14 +16,22 @@ final class HarpPlayer: ObservableObject {
 
     @Published private(set) var selection = PadSelection()
     /// Strings with a finger on them, to light them.
-    @Published private(set) var touchedStrings: Set<Int> = []
+    /// The strings lit under the fingers. On an object of their own: a strum changes
+    /// them string by string, and only the plate's strings need to redraw for it, not
+    /// every view that watches the harp (code review, 2026-11-23).
+    let plateLights = PlateLights()
 
     /// Auto-strum on: pressing a pad sounds it, in the chosen pattern. Not saved; the
     /// app always opens with it off.
     @Published private(set) var isAutoStrumming = false
 
     /// The rhythm section: running, and where in the bar, for the beat light.
+    /// What the rhythm section is doing: running, intro, fill, outro, INTRO lit.
+    /// Changes only when one of those does; the beat itself is `beatClock`'s.
     @Published private(set) var rhythm = RhythmPosition()
+    /// The bar and beat, for the beat lights alone: they change every beat, and
+    /// nothing else on screen needs to redraw for that.
+    let beatClock = BeatClock()
     /// SYNC: the rhythm waits and starts with the first pad (auto-strum on) or the
     /// first strum (auto-strum off), rather than at START. Not saved.
     @Published private(set) var isRhythmArmed = false
@@ -56,9 +64,14 @@ final class HarpPlayer: ObservableObject {
         strummer.setStyle(store.setup.rhythmStyle)
         strummer.setVariation(store.setup.rhythmVariation)
         strummer.onPosition = { [weak self] position in
-            guard let self, position != rhythm else { return }
-            let stopped = rhythm.running && !position.running
-            rhythm = position
+            guard let self else { return }
+            beatClock.show(position)
+            var status = position
+            status.bar = 0
+            status.beat = 0
+            guard status != rhythm else { return }
+            let stopped = rhythm.running && !status.running
+            rhythm = status
             // With HOLD on, the kept chord ends with the band, so auto-strum stops
             // with the drums (Graham, 2026-11-22), after STOP or an outro.
             if stopped, selection.isHolding { stopKeptChord() }
@@ -82,16 +95,36 @@ final class HarpPlayer: ObservableObject {
 
     /// The note on each string, bottom string first, in the plate pattern's order: the
     /// scale chosen, or the chord held now (empty with none held).
+    /// Kept until something it depends on changes: every string a strum crosses asks
+    /// for it (code review, 2026-11-23).
     var plateNotes: [Int] {
+        let inputs = PlateInputs(chord: chord, key: key, scale: plateScale, strings: stringCount,
+                                 octaveShift: octaveShift, pattern: platePattern)
+        if let cached = plateNotesCache, cached.inputs == inputs { return cached.notes }
+        let notes: [Int]
         if plateScale != .chord {
-            return StrumPlate.notes(for: plateScale, in: key, chord: chord, strings: stringCount,
-                                    octaveShift: octaveShift, pattern: platePattern)
+            notes = StrumPlate.notes(for: plateScale, in: key, chord: chord, strings: stringCount,
+                                     octaveShift: octaveShift, pattern: platePattern)
+        } else if let chord {
+            notes = StrumPlate.notes(for: chord, strings: stringCount,
+                                     from: StrumPlate.lowestNote(in: key, octaveShift: octaveShift),
+                                     pattern: platePattern)
+        } else {
+            notes = []
         }
-        guard let chord else { return [] }
-        return StrumPlate.notes(for: chord, strings: stringCount,
-                                from: StrumPlate.lowestNote(in: key, octaveShift: octaveShift),
-                                pattern: platePattern)
+        plateNotesCache = (inputs, notes)
+        return notes
     }
+
+    private struct PlateInputs: Equatable {
+        let chord: Chord?
+        let key: MajorKey
+        let scale: PlateScale
+        let strings: Int
+        let octaveShift: Int
+        let pattern: PlatePattern
+    }
+    private var plateNotesCache: (inputs: PlateInputs, notes: [Int])?
 
     /// The plate's notes in straight order, which auto-strum's figures are built from.
     private var straightNotes: [Int] {
@@ -107,7 +140,7 @@ final class HarpPlayer: ObservableObject {
     func setPlateScale(_ scale: PlateScale) {
         guard scale != plateScale else { return }
         stopRinging()
-        touchedStrings = []
+        plateLights.clear()
         store.setPlateScale(scale)
         syncAutoStrum(newPad: false)
     }
@@ -158,7 +191,7 @@ final class HarpPlayer: ObservableObject {
 
     func setPlateStrings(_ strings: Int) {
         store.setPlateStrings(strings)
-        touchedStrings = []
+        plateLights.clear()
         syncAutoStrum(newPad: false)
     }
 
@@ -332,7 +365,7 @@ final class HarpPlayer: ObservableObject {
     }
 
     func setTouchedStrings(_ strings: Set<Int>) {
-        if strings != touchedStrings { touchedStrings = strings }
+        plateLights.show(strings)
     }
 
     /// MIDI panic, for a stuck note: stop auto-strum's notes and the plate's, and send
@@ -343,7 +376,7 @@ final class HarpPlayer: ObservableObject {
         isRhythmArmed = false
         ringing.removeAll()
         held.removeAll()
-        touchedStrings = []
+        plateLights.clear()
         store.engine.panic()
         store.router.panicMIDI()
     }
@@ -357,10 +390,30 @@ final class HarpPlayer: ObservableObject {
     /// The harp is leaving the screen: lift every pad and silence the plate.
     func releaseAll() {
         selection.releaseAll()
-        touchedStrings = []
+        plateLights.clear()
         stopRinging()
         strummer.stop()
         isRhythmArmed = false
         syncAutoStrum(newPad: false)
+    }
+}
+
+/// The strings lit under the fingers (HarpPlayer.plateLights).
+final class PlateLights: ObservableObject {
+    @Published private(set) var touched: Set<Int> = []
+
+    func show(_ strings: Set<Int>) {
+        if strings != touched { touched = strings }
+    }
+
+    func clear() { show([]) }
+}
+
+/// The rhythm section's bar and beat, for the beat lights (HarpPlayer.beatClock).
+final class BeatClock: ObservableObject {
+    @Published private(set) var position = RhythmPosition()
+
+    func show(_ new: RhythmPosition) {
+        if new != position { position = new }
     }
 }
