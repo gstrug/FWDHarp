@@ -315,3 +315,9 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   retuneHeldStrings: held strings re-strike their note in the new chord.
 - 2026-11-23: KEY menu lists the 12 keys of the current mode; MAJ / MIN chips
   (KeyModeToggle) beside KEY in the same grid cell (a row of its own made the plate shorter), keeping the tonic.
+- 2026-11-23: plate slide reworked (Graham couldn't hear expression: ±12/127 for a small
+  wobble was inaudible on a fading harp). PlateSlide (expression, modWheel, pitchBend,
+  aftertouch, off) × SlideDepth (subtle/medium/strong spans), HarpSetup.plateSlide /
+  slideDepth, chosen in the MIDI menu's Strum Plate Slide section.
+  NoteRouter.performance(status:data1:data2:) for CC / bend / pressure. Resets to resting
+  1 s after the last lift; switching resets the old control; PANIC resets all.
