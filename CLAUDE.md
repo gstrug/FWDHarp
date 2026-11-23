@@ -282,3 +282,13 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   (overlays, banner; Learn is switched on only from the MIDI menu's Learn button), MIDISettingsView (was MIDIOutView: controllers,
   templates, clock in, MIDI out). BPM shows the clock's tempo + CLOCK chip while
   following. Top bar: no AUTO label; ⓘ at far right. Untested on a device yet.
+- 2026-11-23: code review for CPU. Rhythm bars compiled once per style
+  (CompiledRhythmStyle; the conductor looks steps up); AutoStrum.cycle worked out on
+  chord/pattern change (Conductor.autoCycle); HarpPlayer.plateNotes cached on its
+  inputs; lit strings (PlateLights) and beat (BeatClock) are separate small
+  ObservableObjects — keep high-rate state OUT of HarpPlayer's @Published, since
+  every view watches it; meters measured only while the mixer is open
+  (engine.metersShown); MIDI activity at most 10/s; Learn strip observes the centre
+  only while on. Removed unused: AutoStrum.stepInterval, PlateScale.followsChord,
+  engine currentStatus/quietTelemetry/telemetrySuppressed/ensureRunning/hasInstrument.
+  Build has no warnings.
