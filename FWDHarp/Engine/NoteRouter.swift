@@ -72,6 +72,18 @@ nonisolated final class NoteRouter: @unchecked Sendable {
         }
     }
 
+    /// A controller change (expression, for the plate's slide) to the part's instrument
+    /// and its MIDI channel.
+    func controller(_ part: HarpPart, number: UInt8, value: UInt8) {
+        locked {
+            if settings.playsOwnSound(part), let track = tracks[part] {
+                engine.sendPerformanceMessage(trackID: track, status: 0xB0, data1: number, data2: value)
+            }
+            guard settings.enabled else { return }
+            midi.send(MIDIBytes.controller(number, value: value, channel: settings.channel(for: part)))
+        }
+    }
+
     /// PANIC, at the other end of MIDI out too: each note sent is released, then
     /// sustain off and All Notes Off on each part's channel.
     func panicMIDI() {

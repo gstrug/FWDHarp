@@ -1,12 +1,12 @@
 import SwiftUI
 
 /// The strum plate: strings across a tall strip, low at the bottom. Touch a string to
-/// pluck it, or sweep across them to strum; further right is louder. Every finger is
-/// followed, and a fast sweep that skips strings between touch reports still plays
-/// each one, in order.
+/// pluck it, or sweep across them to strum; further right is louder, and sliding a
+/// held finger sideways swells or softens the sound. Every finger is followed, and a
+/// fast sweep that skips strings between touch reports still plays each one, in
+/// order. Held strings follow a chord change.
 struct StrumPlateView: View {
     @ObservedObject var player: HarpPlayer
-    @State private var touches = PlateTouches()
 
     var body: some View {
         GeometryReader { proxy in
@@ -33,14 +33,18 @@ struct StrumPlateView: View {
                         .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
                 }
 
+                // Each finger is followed by the harp itself (HarpPlayer.touchBegan …), so
+                // a chord change can retune the strings held.
                 MultiTouchSurface(
                     onBegan: { id, point in
-                        touches.begin(id, at: place(point, in: size, strings: count), player: player)
+                        let spot = place(point, in: size, strings: count)
+                        player.touchBegan(id, string: spot.string, loudness: spot.loudness)
                     },
                     onMoved: { id, point in
-                        touches.move(id, to: place(point, in: size, strings: count), player: player)
+                        let spot = place(point, in: size, strings: count)
+                        player.touchMoved(id, string: spot.string, loudness: spot.loudness)
                     },
-                    onEnded: { id in touches.end(id, player: player) }
+                    onEnded: { id in player.touchEnded(id) }
                 )
                 .accessibilityHidden(true)
             }
@@ -51,50 +55,10 @@ struct StrumPlateView: View {
                             ?? "No chord held")
     }
 
-    private func place(_ point: CGPoint, in size: CGSize, strings: Int) -> PlateTouches.Place {
+    private func place(_ point: CGPoint, in size: CGSize, strings: Int) -> (string: Int, loudness: Double) {
         let fromBottom = size.height > 0 ? 1 - Double(point.y / size.height) : 0
         let across = size.width > 0 ? Double(point.x / size.width) : 0
-        return .init(string: StrumPlate.string(atHeight: fromBottom, strings: strings),
-                     loudness: min(max(across, 0), 1))
-    }
-}
-
-/// The string each finger is on, and the note it started there.
-private final class PlateTouches {
-    struct Place { let string: Int; let loudness: Double }
-    private var stringForTouch: [ObjectIdentifier: Int] = [:]
-    private var noteForTouch: [ObjectIdentifier: UInt8] = [:]
-
-    func begin(_ id: ObjectIdentifier, at place: Place, player: HarpPlayer) {
-        stringForTouch[id] = place.string
-        noteForTouch[id] = player.pluck(string: place.string, loudness: place.loudness)
-        light(player)
-    }
-
-    func move(_ id: ObjectIdentifier, to place: Place, player: HarpPlayer) {
-        guard let before = stringForTouch[id], before != place.string else { return }
-        // The new string sounds before the old one is let go, so a note on both
-        // strings is never cut. Strings swept past in between are let go at once.
-        let crossed = StrumPlate.strings(crossedFrom: before, to: place.string)
-        var landed: UInt8?
-        for string in crossed {
-            let note = player.pluck(string: string, loudness: place.loudness)
-            if string == place.string { landed = note } else if let note { player.lift(note: note) }
-        }
-        if let previous = noteForTouch[id] { player.lift(note: previous) }
-        stringForTouch[id] = place.string
-        noteForTouch[id] = landed
-        light(player)
-    }
-
-    func end(_ id: ObjectIdentifier, player: HarpPlayer) {
-        stringForTouch.removeValue(forKey: id)
-        if let note = noteForTouch.removeValue(forKey: id) { player.lift(note: note) }
-        light(player)
-    }
-
-    private func light(_ player: HarpPlayer) {
-        player.setTouchedStrings(Set(stringForTouch.values))
+        return (StrumPlate.string(atHeight: fromBottom, strings: strings), min(max(across, 0), 1))
     }
 }
 

@@ -135,12 +135,12 @@ final class HarpPlayer: ObservableObject {
 
     func setPlatePattern(_ pattern: PlatePattern) {
         store.setPlatePattern(pattern)
+        retuneHeldStrings()
     }
 
     func setPlateScale(_ scale: PlateScale) {
         guard scale != plateScale else { return }
         stopRinging()
-        plateLights.clear()
         store.setPlateScale(scale)
         syncAutoStrum(newPad: false)
     }
@@ -191,7 +191,6 @@ final class HarpPlayer: ObservableObject {
 
     func setPlateStrings(_ strings: Int) {
         store.setPlateStrings(strings)
-        plateLights.clear()
         syncAutoStrum(newPad: false)
     }
 
@@ -306,13 +305,120 @@ final class HarpPlayer: ObservableObject {
         strummer.fill()
     }
 
-    /// Tell the strummer the chord and plate as they are now.
+    /// Tell the strummer the chord and plate as they are now, and retune the strings
+    /// fingers are holding to it.
     private func syncAutoStrum(newPad: Bool) {
+        retuneHeldStrings()
         strummer.update(chord: chord, plateNotes: straightNotes,
                         scale: plateScale.autoStrumColour(in: key, chord: chord), newPad: newPad)
     }
 
     // MARK: Plate
+
+    /// Each finger on the plate: its string, the note it is sounding there, how far
+    /// across it is, and where it was when it touched (for the slide's expression).
+    private struct PlateTouch {
+        var string: Int
+        var note: UInt8?
+        var loudness: Double
+        var anchor: Double
+    }
+    private var plateTouches: [ObjectIdentifier: PlateTouch] = [:]
+
+    /// A finger touches the plate: its string sounds, `loudness` 0 (left) to 1 (right).
+    func touchBegan(_ id: ObjectIdentifier, string: Int, loudness: Double) {
+        let note = pluck(string: string, loudness: loudness)
+        plateTouches[id] = PlateTouch(string: string, note: note, loudness: loudness, anchor: loudness)
+        resetExpressionWork?.cancel()
+        setExpression(for: loudness, anchor: loudness)
+        showTouchedStrings()
+    }
+
+    /// A finger moves: onto other strings (each one crossed sounds, in order), and
+    /// across, which swells or softens the plate as it goes (Graham, 2026-11-23:
+    /// sliding side to side for a vibrato-like wobble or a gentle swell).
+    func touchMoved(_ id: ObjectIdentifier, string: Int, loudness: Double) {
+        guard var touch = plateTouches[id] else { return }
+        if string != touch.string {
+            // The new string sounds before the old one is let go, so a note on both
+            // strings is never cut. Strings swept past in between are let go at once.
+            var landed: UInt8?
+            for crossed in StrumPlate.strings(crossedFrom: touch.string, to: string) {
+                let note = pluck(string: crossed, loudness: loudness)
+                if crossed == string { landed = note } else if let note { lift(note: note) }
+            }
+            if let previous = touch.note { lift(note: previous) }
+            touch.string = string
+            touch.note = landed
+            // A new string is a new pluck: the slide starts again from here.
+            touch.anchor = loudness
+        }
+        touch.loudness = loudness
+        plateTouches[id] = touch
+        setExpression(for: loudness, anchor: touch.anchor)
+        showTouchedStrings()
+    }
+
+    func touchEnded(_ id: ObjectIdentifier) {
+        guard let touch = plateTouches.removeValue(forKey: id) else { return }
+        if let note = touch.note { lift(note: note) }
+        showTouchedStrings()
+        // With every finger off, the plate goes back to full expression once the
+        // last notes have faded, so the next strum starts from the usual loudness.
+        if plateTouches.isEmpty {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, plateTouches.isEmpty else { return }
+                sendExpression(Self.neutralExpression)
+            }
+            resetExpressionWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+        }
+    }
+
+    private func showTouchedStrings() {
+        plateLights.show(Set(plateTouches.values.map(\.string)))
+    }
+
+    /// A chord change (or a modifier, key, scale or octave change) while fingers hold
+    /// strings: each held string changes to its note in the new chord, struck at the
+    /// finger's loudness, so there is no need to lift and touch again (Graham,
+    /// 2026-11-23). A string whose note is the same keeps sounding.
+    private func retuneHeldStrings() {
+        guard !plateTouches.isEmpty else { return }
+        let notes = plateNotes
+        for (id, touch) in plateTouches {
+            let wanted = notes.indices.contains(touch.string) ? UInt8(notes[touch.string]) : nil
+            // The same note, still sounding: left alone. (A pad change has just let
+            // every note go, so there the same note is struck again.)
+            if wanted == touch.note, touch.note.map(ringing.contains) ?? true { continue }
+            if let old = touch.note { lift(note: old) }
+            plateTouches[id]?.note = pluck(string: touch.string, loudness: touch.loudness)
+        }
+    }
+
+    // MARK: Slide expression
+
+    /// The plate's expression (MIDI controller 11) when a finger lands: a little below
+    /// full, so a slide right can swell it as well as a slide left soften it.
+    private static let neutralExpression: UInt8 = 110
+    /// How much a slide right across the whole plate adds (left takes it away).
+    private static let slideRange: Double = 120
+    private var sentExpression: UInt8?
+    private var resetExpressionWork: DispatchWorkItem?
+
+    /// Expression from how far the finger has slid since it touched: none at the
+    /// touch, so nothing jumps; louder to the right, softer to the left. The whole
+    /// plate's channel follows the finger that moved last.
+    private func setExpression(for loudness: Double, anchor: Double) {
+        let value = Double(Self.neutralExpression) + (loudness - anchor) * Self.slideRange
+        sendExpression(UInt8(min(max(value, 30), 127).rounded()))
+    }
+
+    private func sendExpression(_ value: UInt8) {
+        guard value != sentExpression else { return }
+        sentExpression = value
+        store.router.controller(.plate, number: 11, value: value)
+    }
 
     /// Play one string, `loudness` 0 (left edge) to 1 (right edge). Returns the note
     /// played, which the finger hands back to `lift` when it leaves the string.
@@ -364,10 +470,6 @@ final class HarpPlayer: ObservableObject {
         store.setPlateRing(ring)
     }
 
-    func setTouchedStrings(_ strings: Set<Int>) {
-        plateLights.show(strings)
-    }
-
     /// MIDI panic, for a stuck note: stop auto-strum's notes and the plate's, and send
     /// every instrument All Sound Off, All Notes Off and a note-off for every note.
     /// AUTO and HOLD stay as they are; auto-strum starts again with the next pad.
@@ -376,8 +478,11 @@ final class HarpPlayer: ObservableObject {
         isRhythmArmed = false
         ringing.removeAll()
         held.removeAll()
+        plateTouches.removeAll()
         plateLights.clear()
         store.engine.panic()
+        sentExpression = nil
+        sendExpression(127)
         store.router.panicMIDI()
     }
 
@@ -390,6 +495,7 @@ final class HarpPlayer: ObservableObject {
     /// The harp is leaving the screen: lift every pad and silence the plate.
     func releaseAll() {
         selection.releaseAll()
+        plateTouches.removeAll()
         plateLights.clear()
         stopRinging()
         strummer.stop()
