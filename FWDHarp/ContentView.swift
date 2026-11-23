@@ -251,7 +251,12 @@ private struct PlateControls: View {
         // the order over STRINGS, RING over OCT.
         Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
             GridRow {
-                KeyMenu(player: player)
+                // MAJ / MIN beside KEY, so the plate keeps its height (Graham,
+                // 2026-11-23: a row of its own made the plate shorter).
+                HStack(spacing: 6) {
+                    KeyMenu(player: player)
+                    KeyModeToggle(player: player)
+                }
                 StudioMenu(title: player.platePattern.title, label: "Plate order",
                            titles: PlatePattern.allCases.map(\.title)) {
                     ForEach(PlatePattern.allCases, id: \.self) { pattern in
@@ -264,11 +269,6 @@ private struct PlateControls: View {
                         check(ring.title, ring == player.plateRing) { player.setPlateRing(ring) }
                     }
                 }
-            }
-            // Major or minor, right under KEY (Graham, 2026-11-23: one list of all 24
-            // keys was hard to find a way around).
-            GridRow {
-                KeyModeToggle(player: player)
             }
             GridRow {
                 ScaleMenu(player: player)
