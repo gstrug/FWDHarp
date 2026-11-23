@@ -78,6 +78,9 @@ nonisolated struct HarpSetup: Codable, Equatable {
     /// loaded twice). The plate's sound is the fields above, as before, so a setup
     /// saved before parts existed opens unchanged.
     var autoSound: PartSound? = nil
+    /// What sliding a held finger sideways does, and how strongly (2026-11-23).
+    var plateSlide: PlateSlide = .expression
+    var slideDepth: SlideDepth = .medium
     var plateMix = ChannelMix()
     var autoMix = ChannelMix()
     /// The rhythm section's sounds: the built-in drum kit and a finger bass to start
@@ -182,6 +185,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
         case plateStrings, octaveShift, autoStrumPattern, tempo, platePattern, plateScale
         case autoSound, plateMix, autoMix, masterVolume, plateRing, midiOut
         case drumsSound, bassSound, drumsMix, bassMix, rhythmStyle, rhythmVariation
+        case plateSlide, slideDepth
     }
 
     /// Read from older files, never written.
@@ -226,6 +230,8 @@ nonisolated struct HarpSetup: Codable, Equatable {
         bassMix = try c.decodeIfPresent(ChannelMix.self, forKey: .bassMix) ?? ChannelMix()
         rhythmStyle = (try? c.decodeIfPresent(RhythmStyle.self, forKey: .rhythmStyle)) ?? .rock
         rhythmVariation = (try? c.decodeIfPresent(RhythmVariation.self, forKey: .rhythmVariation)) ?? .a
+        plateSlide = (try? c.decodeIfPresent(PlateSlide.self, forKey: .plateSlide)) ?? .expression
+        slideDepth = (try? c.decodeIfPresent(SlideDepth.self, forKey: .slideDepth)) ?? .medium
     }
 }
 

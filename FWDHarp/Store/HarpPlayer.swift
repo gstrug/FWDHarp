@@ -329,8 +329,8 @@ final class HarpPlayer: ObservableObject {
     func touchBegan(_ id: ObjectIdentifier, string: Int, loudness: Double) {
         let note = pluck(string: string, loudness: loudness)
         plateTouches[id] = PlateTouch(string: string, note: note, loudness: loudness, anchor: loudness)
-        resetExpressionWork?.cancel()
-        setExpression(for: loudness, anchor: loudness)
+        resetSlideWork?.cancel()
+        applySlide(loudness: loudness, anchor: loudness)
         showTouchedStrings()
     }
 
@@ -355,7 +355,7 @@ final class HarpPlayer: ObservableObject {
         }
         touch.loudness = loudness
         plateTouches[id] = touch
-        setExpression(for: loudness, anchor: touch.anchor)
+        applySlide(loudness: loudness, anchor: touch.anchor)
         showTouchedStrings()
     }
 
@@ -363,15 +363,15 @@ final class HarpPlayer: ObservableObject {
         guard let touch = plateTouches.removeValue(forKey: id) else { return }
         if let note = touch.note { lift(note: note) }
         showTouchedStrings()
-        // With every finger off, the plate goes back to full expression once the
-        // last notes have faded, so the next strum starts from the usual loudness.
+        // With every finger off, the slide goes back to where a finger lands once the
+        // last notes have faded, so the next strum starts from the usual sound.
         if plateTouches.isEmpty {
             let work = DispatchWorkItem { [weak self] in
                 guard let self, plateTouches.isEmpty else { return }
-                sendExpression(Self.neutralExpression)
+                send(store.setup.plateSlide.resting(depth: store.setup.slideDepth))
             }
-            resetExpressionWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+            resetSlideWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
         }
     }
 
@@ -396,28 +396,37 @@ final class HarpPlayer: ObservableObject {
         }
     }
 
-    // MARK: Slide expression
+    // MARK: Slide
 
-    /// The plate's expression (MIDI controller 11) when a finger lands: a little below
-    /// full, so a slide right can swell it as well as a slide left soften it.
-    private static let neutralExpression: UInt8 = 110
-    /// How much a slide right across the whole plate adds (left takes it away).
-    private static let slideRange: Double = 120
-    private var sentExpression: UInt8?
-    private var resetExpressionWork: DispatchWorkItem?
+    var plateSlide: PlateSlide { store.setup.plateSlide }
+    var slideDepth: SlideDepth { store.setup.slideDepth }
 
-    /// Expression from how far the finger has slid since it touched: none at the
-    /// touch, so nothing jumps; louder to the right, softer to the left. The whole
-    /// plate's channel follows the finger that moved last.
-    private func setExpression(for loudness: Double, anchor: Double) {
-        let value = Double(Self.neutralExpression) + (loudness - anchor) * Self.slideRange
-        sendExpression(UInt8(min(max(value, 30), 127).rounded()))
+    /// Choose what the slide controls. The control it leaves is set back to normal, so
+    /// nothing is left bent or quietened.
+    func setPlateSlide(_ slide: PlateSlide) {
+        guard slide != plateSlide else { return }
+        send(plateSlide.reset)
+        store.setPlateSlide(slide)
+        send(slide.resting(depth: slideDepth))
     }
 
-    private func sendExpression(_ value: UInt8) {
-        guard value != sentExpression else { return }
-        sentExpression = value
-        store.router.controller(.plate, number: 11, value: value)
+    func setSlideDepth(_ depth: SlideDepth) {
+        store.setSlideDepth(depth)
+    }
+
+    private var sentSlide: (status: UInt8, data1: UInt8, data2: UInt8)?
+    private var resetSlideWork: DispatchWorkItem?
+
+    /// The slide for a finger at `loudness` that landed at `anchor` (both 0–1 across).
+    private func applySlide(loudness: Double, anchor: Double) {
+        send(plateSlide.message(slide: loudness - anchor, depth: slideDepth))
+    }
+
+    private func send(_ message: (status: UInt8, data1: UInt8, data2: UInt8)?) {
+        guard let message else { return }
+        if let last = sentSlide, last == message { return }
+        sentSlide = message
+        store.router.performance(.plate, status: message.status, data1: message.data1, data2: message.data2)
     }
 
     /// Play one string, `loudness` 0 (left edge) to 1 (right edge). Returns the note
@@ -481,8 +490,9 @@ final class HarpPlayer: ObservableObject {
         plateTouches.removeAll()
         plateLights.clear()
         store.engine.panic()
-        sentExpression = nil
-        sendExpression(127)
+        // Every control the slide can move, back to normal.
+        sentSlide = nil
+        for slide in PlateSlide.allCases { send(slide.reset) }
         store.router.panicMIDI()
     }
 

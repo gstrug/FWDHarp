@@ -71,3 +71,42 @@ final class PlateRingTests: XCTestCase {
         XCTAssertEqual(try SetupStorage.decode(JSONEncoder().encode(setup)).plateRing, .short)
     }
 }
+
+/// The strum plate's slide (2026-11-23).
+final class PlateSlideTests: XCTestCase {
+    func testNothingMovesWhereTheFingerLands() {
+        XCTAssertEqual(PlateSlide.expression.message(slide: 0, depth: .medium)?.data2, PlateSlide.landingExpression)
+        XCTAssertEqual(PlateSlide.modWheel.message(slide: 0, depth: .medium)?.data2, 0)
+        let bend = PlateSlide.pitchBend.message(slide: 0, depth: .strong)!
+        XCTAssertEqual(Int(bend.data1) | Int(bend.data2) << 7, 8192, "no bend")
+        XCTAssertNil(PlateSlide.off.message(slide: 0.5, depth: .medium))
+    }
+
+    func testASmallWobbleIsHeard() {
+        // A tenth of the plate (about 30 points): enough to hear at Medium.
+        let right = PlateSlide.expression.message(slide: 0.1, depth: .medium)!
+        let left = PlateSlide.expression.message(slide: -0.1, depth: .medium)!
+        XCTAssertEqual(right.status, 0xB0)
+        XCTAssertEqual(right.data1, 11)
+        XCTAssertGreaterThanOrEqual(Int(right.data2) - Int(left.data2), 50)
+        XCTAssertEqual(PlateSlide.modWheel.message(slide: -0.2, depth: .medium)?.data2, 60, "either way adds")
+        XCTAssertEqual(PlateSlide.aftertouch.message(slide: 0.2, depth: .medium)?.status, 0xD0)
+        let up = PlateSlide.pitchBend.message(slide: 0.1, depth: .medium)!
+        XCTAssertEqual(up.status, 0xE0)
+        XCTAssertEqual(Int(up.data1) | Int(up.data2) << 7, 8992)
+        let full = PlateSlide.pitchBend.message(slide: 1, depth: .strong)!
+        XCTAssertEqual(Int(full.data1) | Int(full.data2) << 7, 16383, "held to the top")
+    }
+
+    func testResetsAndSaving() throws {
+        XCTAssertEqual(PlateSlide.expression.reset?.data2, 127)
+        XCTAssertEqual(PlateSlide.pitchBend.reset.map { Int($0.data1) | Int($0.data2) << 7 }, 8192)
+        var setup = HarpSetup()
+        XCTAssertEqual(setup.plateSlide, .expression)
+        setup.plateSlide = .pitchBend
+        setup.slideDepth = .strong
+        let back = try SetupStorage.decode(JSONEncoder().encode(setup))
+        XCTAssertEqual(back.plateSlide, .pitchBend)
+        XCTAssertEqual(back.slideDepth, .strong)
+    }
+}

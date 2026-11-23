@@ -72,15 +72,16 @@ nonisolated final class NoteRouter: @unchecked Sendable {
         }
     }
 
-    /// A controller change (expression, for the plate's slide) to the part's instrument
-    /// and its MIDI channel.
-    func controller(_ part: HarpPart, number: UInt8, value: UInt8) {
+    /// A controller, pitch bend or channel aftertouch (`status` 0xB0, 0xE0 or 0xD0, for
+    /// the plate's slide) to the part's instrument and its MIDI channel.
+    func performance(_ part: HarpPart, status: UInt8, data1: UInt8, data2: UInt8) {
         locked {
             if settings.playsOwnSound(part), let track = tracks[part] {
-                engine.sendPerformanceMessage(trackID: track, status: 0xB0, data1: number, data2: value)
+                engine.sendPerformanceMessage(trackID: track, status: status, data1: data1, data2: data2)
             }
             guard settings.enabled else { return }
-            midi.send(MIDIBytes.controller(number, value: value, channel: settings.channel(for: part)))
+            let first = MIDIBytes.status(status & 0xF0, channel: settings.channel(for: part))
+            midi.send(status & 0xF0 == 0xD0 ? [first, data1 & 0x7F] : [first, data1 & 0x7F, data2 & 0x7F])
         }
     }
 

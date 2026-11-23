@@ -295,3 +295,100 @@ nonisolated enum PlateRing: String, CaseIterable, Codable {
         }
     }
 }
+
+/// What sliding a held finger sideways on the plate does (Graham, 2026-11-23). A note's
+/// MIDI velocity is fixed when it starts, so the slide sends a control the instrument
+/// keeps listening to, measured from where the finger landed (nothing moves at the
+/// touch). The plate's whole channel follows the finger that moved last.
+nonisolated enum PlateSlide: String, CaseIterable, Codable {
+    /// Expression (controller 11): louder to the right, softer to the left. A quick
+    /// wobble gives a tremolo, a slow slide a swell.
+    case expression
+    /// The mod wheel (controller 1): more the further the finger slides either way.
+    case modWheel
+    /// Pitch bend: a wobble is a vibrato, a slide a bend (right up, left down).
+    case pitchBend
+    /// Channel aftertouch: more the further the finger slides either way.
+    case aftertouch
+    case off
+
+    var title: String {
+        switch self {
+        case .expression: return "Expression (volume)"
+        case .modWheel: return "Mod Wheel"
+        case .pitchBend: return "Pitch Bend (vibrato)"
+        case .aftertouch: return "Aftertouch"
+        case .off: return "Off"
+        }
+    }
+
+    /// The message for a finger that has slid `slide` plate-widths from where it
+    /// landed (−1 … 1, right positive), as status and two data bytes (aftertouch uses
+    /// only the first). Nil for Off.
+    func message(slide: Double, depth: SlideDepth) -> (status: UInt8, data1: UInt8, data2: UInt8)? {
+        func clamp(_ value: Double, _ range: ClosedRange<Double>) -> Int {
+            Int(min(max(value, range.lowerBound), range.upperBound).rounded())
+        }
+        switch self {
+        case .expression:
+            let value = clamp(Double(Self.landingExpression) + slide * depth.controllerSpan, 20...127)
+            return (0xB0, 11, UInt8(value))
+        case .modWheel:
+            return (0xB0, 1, UInt8(clamp(abs(slide) * depth.controllerSpan, 0...127)))
+        case .aftertouch:
+            return (0xD0, UInt8(clamp(abs(slide) * depth.controllerSpan, 0...127)), 0)
+        case .pitchBend:
+            let value = clamp(8192 + slide * depth.bendSpan, 0...16383)
+            return (0xE0, UInt8(value & 0x7F), UInt8(value >> 7))
+        case .off:
+            return nil
+        }
+    }
+
+    /// Where a finger landing leaves it: no slide.
+    func resting(depth: SlideDepth) -> (status: UInt8, data1: UInt8, data2: UInt8)? {
+        message(slide: 0, depth: depth)
+    }
+
+    /// The control set back to the instrument's own default, for PANIC or when the
+    /// slide is switched to another control: full expression, no modulation, no bend.
+    var reset: (status: UInt8, data1: UInt8, data2: UInt8)? {
+        switch self {
+        case .expression: return (0xB0, 11, 127)
+        case .modWheel: return (0xB0, 1, 0)
+        case .aftertouch: return (0xD0, 0, 0)
+        case .pitchBend: return (0xE0, 0, 64)
+        case .off: return nil
+        }
+    }
+
+    /// Expression where a finger lands: a little under full, so a slide right can
+    /// still swell.
+    static let landingExpression: UInt8 = 100
+}
+
+/// How strongly the slide acts.
+nonisolated enum SlideDepth: String, CaseIterable, Codable {
+    case subtle, medium, strong
+
+    var title: String { rawValue.capitalized }
+
+    /// Controller steps (of 127) for a slide across the whole plate.
+    var controllerSpan: Double {
+        switch self {
+        case .subtle: return 150
+        case .medium: return 300
+        case .strong: return 600
+        }
+    }
+
+    /// Pitch bend steps (of 8192 each way) for a slide across the whole plate. Most
+    /// instruments bend 2 semitones at full, so Medium's small wobble is a gentle vibrato.
+    var bendSpan: Double {
+        switch self {
+        case .subtle: return 3000
+        case .medium: return 8000
+        case .strong: return 16000
+        }
+    }
+}

@@ -40,6 +40,7 @@ struct MIDISettingsView: View {
                 } footer: {
                     Text("Closes this menu. Tap a control on screen, then move or press the one on your controller to link them. Tap Done on the orange strip when finished.")
                 }
+                slideSection
                 controllersSection
                 templatesSection
                 clockSection
@@ -137,6 +138,32 @@ struct MIDISettingsView: View {
     private func startLearn() {
         center.learn.isOn = true
         dismiss()
+    }
+
+    // MARK: Strum plate slide
+
+    /// What sliding a held finger sideways on the plate sends (Graham, 2026-11-23).
+    private var slideSection: some View {
+        Section {
+            Picker(selection: Binding(get: { player.plateSlide }, set: { player.setPlateSlide($0) })) {
+                ForEach(PlateSlide.allCases, id: \.self) { slide in
+                    Text(slide.title).tag(slide)
+                }
+            } label: {
+                Label("Slide Sends", systemImage: "hand.draw")
+            }
+            Picker("Strength", selection: Binding(get: { player.slideDepth }, set: { player.setSlideDepth($0) })) {
+                ForEach(SlideDepth.allCases, id: \.self) { depth in
+                    Text(depth.title).tag(depth)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(player.plateSlide == .off)
+        } header: {
+            Text("Strum Plate Slide")
+        } footer: {
+            Text("Slide a finger left or right while it holds a string. Expression swells and softens the sound; Pitch Bend gives a vibrato; Mod Wheel and Aftertouch do whatever the instrument has them do (often vibrato or brightness). They go to the plate's instrument and, with MIDI out on, its channel. An instrument that ignores the one chosen won't change: try another.")
+        }
     }
 
     // MARK: Controllers (as FWD's)
