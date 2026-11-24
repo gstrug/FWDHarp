@@ -321,3 +321,8 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   slideDepth, chosen in the MIDI menu's Strum Plate Slide section.
   NoteRouter.performance(status:data1:data2:) for CC / bend / pressure. Resets to resting
   1 s after the last lift; switching resets the old control; PANIC resets all.
+- 2026-11-24: portrait. FWD's `Views/FlowLayout.swift` copied. Top bar: ViewThatFits
+  (one line, else instruments row + app buttons row). AutoStrumBar and RhythmControls
+  are FlowLayouts (wrap). Main area in a GeometryReader: narrower than
+  ContentView.narrowWidth (1000) the plate controls wrap to 300 wide (FlowLayout)
+  instead of the 2-row Grid. Landscape unchanged.
