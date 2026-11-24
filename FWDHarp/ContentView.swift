@@ -16,6 +16,11 @@ struct ContentView: View {
             topBar
             Divider()
             MIDILearnBanner()
+            // Portrait (Graham, 2026-11-24: FWD Sequencer works in portrait, this didn't):
+            // the rows of buttons wrap, as FWD's do, and the plate's controls wrap to the
+            // plate's width so the pads keep as much room as they can.
+            GeometryReader { geometry in
+            let narrow = geometry.size.width < Self.narrowWidth
             HStack(spacing: 24) {
                 // MIX puts the mixer here, in place of the pads, so the plate beside it
                 // can be played while its level is set.
@@ -33,14 +38,14 @@ struct ContentView: View {
                 // The controls may be wider than the plate; they line up with its right
                 // edge and take the room they need from the pads.
                 VStack(alignment: .trailing, spacing: 10) {
-                    PlateControls(player: player)
-                        .fixedSize()
+                    PlateControls(player: player, narrow: narrow)
                     StrumPlateView(player: player)
                         .frame(width: 300)
                         .frame(maxHeight: .infinity)
                 }
             }
             .padding(20)
+            }
         }
         .background(Color(white: 0.08).ignoresSafeArea())
         .sheet(isPresented: $showCredits) { CreditsView() }
@@ -61,14 +66,37 @@ struct ContentView: View {
         .storeNotices(store)
     }
 
+    /// Narrower than this (an iPad in portrait), the screen's rows wrap.
+    static let narrowWidth: CGFloat = 1000
+
     private var topBar: some View {
         // Each part's instrument over its own side of the screen: auto-strum's on the
         // left over the pads, the plate's on the right over the plate, and the app's
         // own buttons in the middle (Graham, 2026-11-22). Same side padding as the pads
-        // and plate below, so the edges line up.
-        HStack(spacing: 12) {
-            AutoInstrumentGroup(player: player)
-            Spacer(minLength: 8)
+        // and plate below, so the edges line up. Too narrow for one line (portrait):
+        // the instruments on top, the app's buttons in the middle underneath.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                AutoInstrumentGroup(player: player)
+                Spacer(minLength: 8)
+                appButtons
+                Spacer(minLength: 8)
+                plateGroup
+            }
+            VStack(spacing: 8) {
+                HStack(spacing: 12) {
+                    AutoInstrumentGroup(player: player)
+                    Spacer(minLength: 8)
+                    plateGroup
+                }
+                appButtons
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+    }
+
+    private var appButtons: some View {
             HStack(spacing: 12) {
                 StudioToggleChip(title: "MIX", isOn: $showMixer, tint: StudioStyle.displayText,
                                  accessibilityLabel: "Mixer, in place of the pads")
@@ -93,7 +121,9 @@ struct ContentView: View {
                 .midiLearnable(.panic)
                 CPUReadout()
             }
-            Spacer(minLength: 8)
+    }
+
+    private var plateGroup: some View {
             HStack(spacing: 10) {
                 PartInstrumentButtons(store: store, part: .plate)
                 EffectsToggleButton(store: store, part: .plate)
@@ -108,9 +138,6 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("FWD Harp: About and Credits")
             }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
     }
 }
 
@@ -245,34 +272,67 @@ private struct ScaleMenu: View {
 /// plays; the order of its notes and how long they ring; its strings and octave.
 private struct PlateControls: View {
     @ObservedObject var player: HarpPlayer
+    /// Portrait: wrapped to the plate's width instead of two wide rows.
+    var narrow = false
 
     var body: some View {
-        // Two rows in columns (Graham, 2026-11-22): KEY over the scale ("Chord"),
-        // the order over STRINGS, RING over OCT.
-        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
-            GridRow {
-                // MAJ / MIN beside KEY, so the plate keeps its height (Graham,
-                // 2026-11-23: a row of its own made the plate shorter).
-                HStack(spacing: 6) {
-                    KeyMenu(player: player)
-                    KeyModeToggle(player: player)
-                }
-                StudioMenu(title: player.platePattern.title, label: "Plate order",
-                           titles: PlatePattern.allCases.map(\.title)) {
-                    ForEach(PlatePattern.allCases, id: \.self) { pattern in
-                        check(pattern.title, pattern == player.platePattern) { player.setPlatePattern(pattern) }
-                    }
-                }
-                StudioMenu(title: "RING \(player.plateRing.title)", label: "How long plate notes ring",
-                           titles: PlateRing.allCases.map { "RING \($0.title)" }) {
-                    ForEach(PlateRing.allCases, id: \.self) { ring in
-                        check(ring.title, ring == player.plateRing) { player.setPlateRing(ring) }
-                    }
-                }
-            }
-            GridRow {
+        if narrow {
+            FlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
+                keyGroup
+                orderMenu
+                ringMenu
                 ScaleMenu(player: player)
                 StringsMenu(player: player)
+                octaveGroup
+            }
+            .frame(width: 300, alignment: .leading)
+        } else {
+            // Two rows in columns (Graham, 2026-11-22): KEY over the scale ("Chord"),
+            // the order over STRINGS, RING over OCT.
+            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
+                GridRow {
+                    keyGroup
+                    orderMenu
+                    ringMenu
+                }
+                GridRow {
+                    ScaleMenu(player: player)
+                    StringsMenu(player: player)
+                    octaveGroup
+                }
+            }
+            .fixedSize()
+        }
+    }
+
+    /// MAJ / MIN beside KEY, so the plate keeps its height (Graham, 2026-11-23: a row
+    /// of its own made the plate shorter).
+    private var keyGroup: some View {
+        HStack(spacing: 6) {
+            KeyMenu(player: player)
+            KeyModeToggle(player: player)
+        }
+    }
+
+    private var orderMenu: some View {
+        StudioMenu(title: player.platePattern.title, label: "Plate order",
+                   titles: PlatePattern.allCases.map(\.title)) {
+            ForEach(PlatePattern.allCases, id: \.self) { pattern in
+                check(pattern.title, pattern == player.platePattern) { player.setPlatePattern(pattern) }
+            }
+        }
+    }
+
+    private var ringMenu: some View {
+        StudioMenu(title: "RING \(player.plateRing.title)", label: "How long plate notes ring",
+                   titles: PlateRing.allCases.map { "RING \($0.title)" }) {
+            ForEach(PlateRing.allCases, id: \.self) { ring in
+                check(ring.title, ring == player.plateRing) { player.setPlateRing(ring) }
+            }
+        }
+    }
+
+    private var octaveGroup: some View {
                 HStack(spacing: 8) {
                 Text("OCT")
                     .font(.system(size: 11, weight: .bold)).tracking(0.8)
@@ -287,8 +347,6 @@ private struct PlateControls: View {
                 octaveButton("chevron.up", step: 1, label: "Octave up",
                              enabled: player.octaveShift < StrumPlate.octaveShiftRange.upperBound)
                 }
-            }
-        }
     }
 
     private func check(_ title: String, _ selected: Bool, _ action: @escaping () -> Void) -> some View {
@@ -364,7 +422,8 @@ private struct AutoStrumBar: View {
     @ObservedObject var player: HarpPlayer
 
     var body: some View {
-        HStack(spacing: 10) {
+        // Wraps onto a second line where it doesn't fit (portrait), as FWD's rows do.
+        FlowLayout(horizontalSpacing: 10, verticalSpacing: 8) {
             StudioToggleChip(title: "AUTO",
                              isOn: Binding(get: { player.isAutoStrumming },
                                            set: { player.setAutoStrumming($0) }),
@@ -424,8 +483,8 @@ private struct AutoStrumBar: View {
                     .accessibilityLabel("Tap tempo")
                     .midiLearnable(.tapTempo)
             }
-            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -439,7 +498,8 @@ private struct RhythmControls: View {
     private var running: Bool { player.rhythm.running }
 
     var body: some View {
-        HStack(spacing: 10) {
+        // Wraps onto a second line where it doesn't fit (portrait), as FWD's rows do.
+        FlowLayout(horizontalSpacing: 10, verticalSpacing: 8) {
             StudioToggleChip(title: running ? "STOP" : "START",
                              isOn: Binding(get: { running }, set: { _ in player.toggleRhythm() }),
                              tint: .green,
@@ -506,8 +566,8 @@ private struct RhythmControls: View {
                 .accessibilityLabel("Fill to the end of the bar")
                 .midiLearnable(.fill)
             BeatLights(clock: player.beatClock, beats: player.rhythmStyle.beatsPerBar)
-            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
