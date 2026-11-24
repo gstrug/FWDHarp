@@ -534,7 +534,11 @@ nonisolated final class MIDIMessageQueue: @unchecked Sendable {
 final class MIDILearnState: ObservableObject {
     /// Learnable controls are outlined and a tap selects one instead of using it.
     @Published var isOn = false {
-        didSet { if !isOn { target = nil } }
+        didSet {
+            if !isOn { target = nil }
+            // One mode that takes over taps at a time, as in FWD.
+            if isOn { HelpCenter.shared.isOn = false }
+        }
     }
     /// The control waiting to be linked to the next message that arrives.
     @Published var target: MIDIControlTarget?

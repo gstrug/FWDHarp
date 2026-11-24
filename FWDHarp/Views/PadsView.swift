@@ -8,6 +8,7 @@ struct PadsView: View {
     @ObservedObject var player: HarpPlayer
     @State private var touches = PadTouches()
     @ObservedObject private var learn = MIDIControlCenter.shared.learn
+    @ObservedObject private var help = HelpCenter.shared
 
     var body: some View {
         GeometryReader { proxy in
@@ -38,6 +39,17 @@ struct PadsView: View {
                 .accessibilityHidden(true)
                 // MIDI Learn: over the touch surface, so a tap picks a pad to link (a
                 // linked button or key then holds the pad as a finger does).
+                // Help mode, the same way: each pad outlined, a tap explains it.
+                if help.isOn {
+                    ForEach(ChordPad.allCases, id: \.self) { pad in
+                        let frame = layout.frame(of: pad)
+                        Color.clear
+                            .frame(width: frame.width, height: frame.height)
+                            .helpTag(pad == .seven ? .seventhPad : (pad.isModifier ? .susPad : .chordPad),
+                                     instance: pad.rawValue)
+                            .offset(x: frame.minX, y: frame.minY)
+                    }
+                }
                 if learn.isOn {
                     ForEach(ChordPad.allCases, id: \.self) { pad in
                         let frame = layout.frame(of: pad)

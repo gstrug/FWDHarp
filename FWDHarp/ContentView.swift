@@ -40,6 +40,7 @@ struct ContentView: View {
                 VStack(alignment: .trailing, spacing: 10) {
                     PlateControls(player: player, narrow: narrow)
                     StrumPlateView(player: player)
+                        .helpTag(.strumPlate)
                         .frame(width: 300)
                         .frame(maxHeight: .infinity)
                 }
@@ -48,6 +49,8 @@ struct ContentView: View {
             }
         }
         .background(Color(white: 0.08).ignoresSafeArea())
+        // Help mode's card at the bottom (HelpMode.swift).
+        .helpHost()
         .sheet(isPresented: $showCredits) { CreditsView() }
         .sheet(isPresented: $showMIDI) { MIDISettingsView(player: player) }
         // MIDI in: controllers, MIDI Learn and the clock, for this harp.
@@ -100,6 +103,7 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 StudioToggleChip(title: "MIX", isOn: $showMixer, tint: StudioStyle.displayText,
                                  accessibilityLabel: "Mixer, in place of the pads")
+                    .helpTag(.mixerButton)
                 // Lit while MIDI out is on or a MIDI clock is followed; opens MIDI settings.
                 StudioChipLabel(title: "MIDI", tint: .cyan,
                                 look: store.midiOut.enabled || player.isFollowingClock ? .on : .off)
@@ -108,6 +112,7 @@ struct ContentView: View {
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("MIDI settings")
                     .accessibilityValue(store.midiOut.enabled ? "Sending" : "Not sending")
+                    .helpTag(.midiButton)
                 // FWD Sequencer's panic button: the red stop sign.
                 Button { player.panic() } label: {
                     Image(systemName: "exclamationmark.octagon.fill")
@@ -119,15 +124,21 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Panic, stop all notes")
                 .midiLearnable(.panic)
+                .helpTag(.panic)
                 CPUReadout()
+                    .helpTag(.cpu)
             }
     }
 
     private var plateGroup: some View {
             HStack(spacing: 10) {
                 PartInstrumentButtons(store: store, part: .plate)
+                    .helpTag(.plateInstrument)
                 EffectsToggleButton(store: store, part: .plate)
                     .midiLearnable(.partEffects(.plate))
+                    .helpTag(.effects, instance: "plate")
+                // Help mode's ?, as on every FWD screen.
+                HelpButton()
                 // About and Credits, at the far right (Graham, 2026-11-22).
                 Button { showCredits = true } label: {
                     Image(systemName: "info.circle")
@@ -137,6 +148,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("FWD Harp: About and Credits")
+                .helpTag(.about)
             }
     }
 }
@@ -152,9 +164,11 @@ private struct AutoInstrumentGroup: View {
         HStack(spacing: 10) {
             PartInstrumentButtons(store: store, part: .auto,
                                   beforeChoosing: { player.setAutoHasOwnSound(true) })
+                .helpTag(.autoInstrument)
             if store.hasOwnSound(.auto) {
                 EffectsToggleButton(store: store, part: .auto)
                     .midiLearnable(.partEffects(.auto))
+                    .helpTag(.effects, instance: "auto")
             }
         }
     }
@@ -281,8 +295,8 @@ private struct PlateControls: View {
                 keyGroup
                 orderMenu
                 ringMenu
-                ScaleMenu(player: player)
-                StringsMenu(player: player)
+                ScaleMenu(player: player).helpTag(.scale)
+                StringsMenu(player: player).helpTag(.strings)
                 octaveGroup
             }
             .frame(width: 300, alignment: .leading)
@@ -296,8 +310,8 @@ private struct PlateControls: View {
                     ringMenu
                 }
                 GridRow {
-                    ScaleMenu(player: player)
-                    StringsMenu(player: player)
+                    ScaleMenu(player: player).helpTag(.scale)
+                    StringsMenu(player: player).helpTag(.strings)
                     octaveGroup
                 }
             }
@@ -309,8 +323,8 @@ private struct PlateControls: View {
     /// of its own made the plate shorter).
     private var keyGroup: some View {
         HStack(spacing: 6) {
-            KeyMenu(player: player)
-            KeyModeToggle(player: player)
+            KeyMenu(player: player).helpTag(.key)
+            KeyModeToggle(player: player).helpTag(.keyMode)
         }
     }
 
@@ -321,6 +335,7 @@ private struct PlateControls: View {
                 check(pattern.title, pattern == player.platePattern) { player.setPlatePattern(pattern) }
             }
         }
+        .helpTag(.plateOrder)
     }
 
     private var ringMenu: some View {
@@ -330,6 +345,7 @@ private struct PlateControls: View {
                 check(ring.title, ring == player.plateRing) { player.setPlateRing(ring) }
             }
         }
+        .helpTag(.ring)
     }
 
     private var octaveGroup: some View {
@@ -347,6 +363,7 @@ private struct PlateControls: View {
                 octaveButton("chevron.up", step: 1, label: "Octave up",
                              enabled: player.octaveShift < StrumPlate.octaveShiftRange.upperBound)
                 }
+                .helpTag(.octave)
     }
 
     private func check(_ title: String, _ selected: Bool, _ action: @escaping () -> Void) -> some View {
@@ -430,12 +447,14 @@ private struct AutoStrumBar: View {
                              tint: .green,
                              accessibilityLabel: "Auto-strum: pressing a pad plays the pattern")
                 .midiLearnable(.autoStrum)
+                .helpTag(.autoStrum)
             StudioToggleChip(title: "HOLD",
                              isOn: Binding(get: { player.selection.isHolding },
                                            set: { player.setHolding($0) }),
                              tint: .orange,
                              accessibilityLabel: "Hold: keep the last chord after lifting your hand")
                 .midiLearnable(.hold)
+                .helpTag(.hold)
             // No STOP here: HOLD off lets the kept chord go, and with HOLD on it ends
             // when the drums stop (Graham, 2026-11-22).
             Menu {
@@ -462,6 +481,7 @@ private struct AutoStrumBar: View {
                 .studioWindow()
             }
             .accessibilityLabel("Pattern: \(player.autoStrumPattern.title)")
+            .helpTag(.autoPattern)
 
             // One tempo for auto-strum and the rhythm section. Following a MIDI clock,
             // it shows the clock's tempo and can't be changed here.
@@ -475,13 +495,16 @@ private struct AutoStrumBar: View {
                           format: { String(format: following ? "%.1f" : "%.0f", $0) })
                 .disabled(following)
                 .midiLearnable(.tempo)
+                .helpTag(following ? .clockTempo : .tempo)
             if following {
                 StudioChipLabel(title: "CLOCK", tint: .cyan, look: player.clockTempo == nil ? .off : .on)
                     .accessibilityLabel(player.clockTempo == nil ? "Waiting for MIDI clock" : "Following MIDI clock")
+                    .helpTag(.clockTempo, instance: "chip")
             } else {
                 StudioTapButton(title: "TAP") { player.tapTempo() }
                     .accessibilityLabel("Tap tempo")
                     .midiLearnable(.tapTempo)
+                    .helpTag(.tapTempo)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -505,6 +528,7 @@ private struct RhythmControls: View {
                              tint: .green,
                              accessibilityLabel: "Start or stop the drums and bass")
                 .midiLearnable(.rhythmStartStop)
+                .helpTag(.rhythmStart)
             StudioToggleChip(title: "SYNC",
                              isOn: Binding(get: { player.isRhythmArmed }, set: { player.armRhythm($0) }),
                              tint: .cyan,
@@ -512,6 +536,7 @@ private struct RhythmControls: View {
                 .disabled(running)
                 .opacity(running ? 0.45 : 1)
                 .midiLearnable(.rhythmSync)
+                .helpTag(.rhythmSync)
             Menu {
                 ForEach(RhythmStyle.allCases, id: \.self) { style in
                     Button {
@@ -536,6 +561,7 @@ private struct RhythmControls: View {
                 .studioWindow()
             }
             .accessibilityLabel("Rhythm style: \(player.rhythmStyle.title)")
+            .helpTag(.rhythmStyle)
             ForEach(RhythmVariation.allCases, id: \.self) { variation in
                 StudioToggleChip(title: variation.title,
                                  isOn: Binding(get: { player.rhythmVariation == variation },
@@ -543,6 +569,7 @@ private struct RhythmControls: View {
                                  tint: StudioStyle.displayText,
                                  accessibilityLabel: "Variation \(variation.title)")
                     .midiLearnable(variation == .a ? .variationA : .variationB)
+                    .helpTag(.rhythmVariation, instance: variation.title)
             }
             // INTRO before the start (it goes off once played); then OUTRO, which plays
             // the style's ending and stops the band (Graham, 2026-11-22).
@@ -552,6 +579,7 @@ private struct RhythmControls: View {
                                  tint: .orange,
                                  accessibilityLabel: "Play the ending and stop")
                     .midiLearnable(.introOutro)
+                    .helpTag(.outro)
             } else {
                 StudioToggleChip(title: "INTRO",
                                  isOn: Binding(get: { player.rhythmIntro }, set: { player.setRhythmIntro($0) }),
@@ -559,13 +587,16 @@ private struct RhythmControls: View {
                                  accessibilityLabel: "Play the style's intro bar first")
                     .allowsHitTesting(!running)
                     .midiLearnable(.introOutro)
+                    .helpTag(.intro)
             }
             StudioTapButton(title: "FILL") { player.fill() }
                 .disabled(!running || player.rhythm.intro || player.rhythm.outro)
                 .opacity(!running || player.rhythm.intro || player.rhythm.outro ? 0.45 : 1)
                 .accessibilityLabel("Fill to the end of the bar")
                 .midiLearnable(.fill)
+                .helpTag(.fill)
             BeatLights(clock: player.beatClock, beats: player.rhythmStyle.beatsPerBar)
+                .helpTag(.beatLights)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

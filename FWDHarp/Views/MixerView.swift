@@ -32,6 +32,7 @@ struct MixerPanel: View {
             }
             StudioTapButton(title: "DONE", action: onDone)
                 .accessibilityLabel("Close the mixer")
+                .helpTag(.mixerDone)
         }
     }
 }
@@ -122,19 +123,23 @@ private struct PartStrip: View {
                     PartMeter(levels: store.levels, trackID: InstrumentStore.trackID(for: part))
                 }
                 .midiLearnable(.partVolume(part))
+                .helpTag(.mixerFader, instance: part.rawValue)
                 Text("Vol").font(.caption2).foregroundStyle(.secondary)
                 EffectsToggleButton(store: store, part: part)
                     .midiLearnable(.partEffects(part))
+                    .helpTag(.mixerEffects, instance: part.rawValue)
                 StudioKnob(value: Binding(get: { Double(mix.pan) }, set: { store.setPan(Float($0), for: part) }),
                            range: -1...1, defaultValue: 0, bipolar: true, size: StripSize.knob,
                            label: "Pan \(panLabel)",
                            format: { _ in panLabel })
                     .midiLearnable(.partPan(part))
+                    .helpTag(.mixerPan, instance: part.rawValue)
                 StudioToggleChip(title: "M",
                                  isOn: Binding(get: { mix.muted }, set: { store.setMuted($0, for: part) }),
                                  tint: .orange,
                                  accessibilityLabel: "Mute \(part.title)")
                     .midiLearnable(.partMute(part))
+                    .helpTag(.mixerMute, instance: part.rawValue)
             }
             // Auto-strum without a sound of its own plays on the plate's channel.
             .disabled(!hasOwn)
@@ -145,10 +150,12 @@ private struct PartStrip: View {
                                  isOn: Binding(get: { hasOwn }, set: { player.setAutoHasOwnSound($0) }),
                                  tint: .green,
                                  accessibilityLabel: "Auto-strum has its own instrument")
+                    .helpTag(.mixerOwnSound)
             }
             if hasOwn {
                 PartInstrumentButtons(store: store, part: part, stacked: true)
                     .frame(maxWidth: StripSize.width - 8)
+                    .helpTag(.mixerInstrument, instance: part.rawValue)
             }
         }
         .frame(width: StripSize.width)
@@ -186,6 +193,7 @@ private struct MasterStrip: View {
                 MasterMeter(levels: levels)
             }
             .midiLearnable(.masterVolume)
+            .helpTag(.mixerMaster)
             Text("Vol").font(.caption2).foregroundStyle(.secondary)
         }
         .frame(width: StripSize.width)
