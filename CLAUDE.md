@@ -326,3 +326,17 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   are FlowLayouts (wrap). Main area in a GeometryReader: narrower than
   ContentView.narrowWidth (1000) the plate controls wrap to 300 wide (FlowLayout)
   instead of the 2-row Grid. Landscape unchanged.
+- 2026-11-24: help mode from FWD (`Views/HelpMode.swift`, without FWD's menu pages;
+  `Views/HelpTopics.swift` written for the harp). ? (HelpButton) on the top bar before ⓘ;
+  `.helpHost()` on ContentView; `.helpTag(topic, instance:)` on every control (after
+  `.midiLearnable`, outside any `.disabled`), per-pad overlays in PadsView, mixer strips
+  by part. Help and Learn switch each other off. When a control changes, change its
+  text in HelpTopics.
+- PARKED (2026-11-24): named songs in a set list for one-touch recall. Explored with
+  Graham: a song = full HarpSetup snapshot (sounds, patches, FX, mix, key, scale, plate,
+  auto, tempo, style); controller links/clock/MIDI out stay app-wide; recall from tiles
+  (in place of the pads), top-bar ◀ name ▶, MIDI Learn next/previous; edits kept but
+  only written on Save (dot shows unsaved); same instruments switch at once (at the bar
+  line with drums), different plugins stop the band and load behind the overlay.
+  FWD's SongStore.open / SongPersistence library is the model. Open questions: one or
+  several set lists; song tempo vs followed clock; bar-line switching wanted?
