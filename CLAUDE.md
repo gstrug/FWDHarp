@@ -361,3 +361,9 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   up an octave (5 1 3 = G C E, 3 5 1 = E G C), each round starting as low as it can.
   A sweep no longer restrikes a note the finger is already sounding (Custom can put
   the same note on neighbouring strings; the cut-and-restrike clicked).
+  Plate centring (same day): StrumPlate.plate(...) builds the whole plate (HarpPlayer
+  calls it). Its bottom drops whole octaves from the usual key-note-in-octave-3 until
+  every string has a note and its middle is within an octave of a 3-octave plate's
+  (decided on the key's tonic chord, so no jump on chord changes). 10/13/16 chord
+  strings and the scales stay put; 20/24 move down. A figure too sparse to fill even
+  then: StrumPlateView shows only the strings it can fill. Auto-strum's notes unchanged.
