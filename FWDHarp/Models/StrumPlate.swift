@@ -72,6 +72,44 @@ nonisolated enum StrumPlate {
                        custom: custom, chordSize: chord.pitchClasses.count, rootAt: rootIndex(of: chord, in: tones))
     }
 
+    /// Everything on the plate, bottom string first: `scale`'s notes, or (with Chord)
+    /// the chord held in the plate pattern's order; none with no chord held.
+    ///
+    /// Centred (Graham, 2026-11-25): from the key's note in octave 3 (moved by OCT) a
+    /// long plate (20 or 24 strings) or a sparse Custom figure ran past the top of
+    /// MIDI and its top strings were silent. The bottom now drops by whole octaves
+    /// until every string has a note and the plate's middle is within an octave of a
+    /// 3-octave plate's middle (or as near as it can get). The drop is worked out on the key's own chord, so
+    /// it is the same for every chord and the plate never jumps an octave on a chord
+    /// change. Plates that already fit (10, 13 and 16 strings of a chord, and the
+    /// scales) stay where they were.
+    static func plate(chord: Chord?, key: MusicKey, scale: PlateScale, strings: Int, octaveShift: Int,
+                      pattern: PlatePattern, custom: [Int]) -> [Int] {
+        func build(_ chord: Chord?, from bottom: Int) -> [Int] {
+            if scale != .chord {
+                return notes(for: scale, in: key, chord: chord, strings: strings, from: bottom, pattern: pattern)
+            }
+            guard let chord else { return [] }
+            return notes(for: chord, strings: strings, from: bottom, pattern: pattern, custom: custom)
+        }
+        let usual = lowestNote(in: key, octaveShift: octaveShift)
+        let target = Double(usual + 18)
+        var bestDrop = 0
+        var bestScore = Double.infinity
+        for drop in 0...max(0, usual / 12) {
+            let notes = build(key.tonicChord, from: usual - 12 * drop)
+            guard let low = notes.min(), let high = notes.max() else { continue }
+            let missing = Double(strings - notes.count)
+            let offCentre = abs(Double(low + high) / 2 - target)
+            // The highest plate that is full and within an octave of the middle: the
+            // usual place unless it does not fit.
+            if missing == 0, offCentre <= 12 { return build(chord, from: usual - 12 * drop) }
+            let score = missing * 1000 + offCentre
+            if score < bestScore { bestScore = score; bestDrop = drop }
+        }
+        return build(chord, from: usual - 12 * bestDrop)
+    }
+
     /// A scale on the plate (PlateScale), one note per string up from the chord's first
     /// note at or above the plate's bottom (the key's note, moved by OCT), in the plate
     /// pattern's order. Every scale follows `chord`, the one held now. Bass + Chord has
@@ -79,10 +117,15 @@ nonisolated enum StrumPlate {
     /// Straight.
     static func notes(for scale: PlateScale, in key: MusicKey, chord: Chord?, strings: Int,
                       octaveShift: Int, pattern: PlatePattern) -> [Int] {
+        notes(for: scale, in: key, chord: chord, strings: strings,
+              from: lowestNote(in: key, octaveShift: octaveShift), pattern: pattern)
+    }
+
+    static func notes(for scale: PlateScale, in key: MusicKey, chord: Chord?, strings: Int,
+                      from bottom: Int, pattern: PlatePattern) -> [Int] {
         guard let classes = scale.pitchClasses(in: key, chord: chord) else { return [] }
         // The bottom string is one of the chord's notes, as in Chord mode: the first at
         // or above the plate's bottom, so a scale never starts on a clash (2026-11-23).
-        let bottom = lowestNote(in: key, octaveShift: octaveShift)
         let home = Set((chord ?? key.tonicChord).pitchClasses)
         // Chromatic stays put on the key's note: a tune's notes must not move when the
         // chord changes (2026-11-25).

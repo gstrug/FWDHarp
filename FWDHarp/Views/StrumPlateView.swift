@@ -11,8 +11,11 @@ struct StrumPlateView: View {
     var body: some View {
         GeometryReader { proxy in
             let size = proxy.size
-            let count = player.stringCount
             let notes = player.plateNotes
+            // A figure too sparse to fill every string even centred (one or two steps
+            // on 24 strings climbs more octaves than MIDI has) gets only the strings it
+            // can fill, spread over the plate, rather than silent ones at the top.
+            let count = notes.isEmpty ? player.stringCount : min(player.stringCount, notes.count)
             ZStack {
                 RoundedRectangle(cornerRadius: 16)
                     .fill(LinearGradient(colors: [StudioStyle.trackTop, StudioStyle.trackBottom],

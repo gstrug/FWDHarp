@@ -135,6 +135,34 @@ final class PatternOptionTests: XCTestCase {
         XCTAssertEqual(run([1], strings: 7), [48, 60, 72, 84, 96, 108, 120], "a one-step figure fills the plate")
     }
 
+    private func whole(_ strings: Int, scale: PlateScale = .chord, pattern: PlatePattern = .straight,
+                       custom: [Int] = [1, 3, 5], chord: Chord? = nil) -> [Int] {
+        StrumPlate.plate(chord: chord ?? cMajor, key: c, scale: scale, strings: strings, octaveShift: 0,
+                         pattern: pattern, custom: custom)
+    }
+
+    func testPlatesThatFitStayPut() {
+        for strings in [10, 13, 16] { XCTAssertEqual(whole(strings).first, 48, "\(strings) strings") }
+        XCTAssertEqual(whole(24, scale: .major).first, 48)
+        XCTAssertEqual(whole(24, scale: .chromatic).first, 48)
+    }
+
+    func testLongPlatesAreFullAndCentred() {
+        let plate = whole(24)
+        XCTAssertEqual(plate.count, 24, "every string has a note")
+        XCTAssertEqual(plate.first, 24, "C1 to G8, centred on the middle")
+        XCTAssertEqual(whole(20).count, 20)
+        let sparse = whole(24, pattern: .custom, custom: [1, 5])
+        XCTAssertEqual(sparse.count, 22, "as many as MIDI's range allows")
+        XCTAssertEqual(sparse.first, 0)
+    }
+
+    func testTheDropIsTheSameForEveryChord() {
+        let g = c.chord(degree: 5), f = c.chord(degree: 4)
+        XCTAssertEqual(whole(24, chord: g).first, 26, "G's first note from C1")
+        XCTAssertEqual(whole(24, chord: f).first, 24)
+    }
+
     func testCustomCountsFromTheRoot() {
         // F over a plate starting on C3: the figure still begins on F.
         let f = c.chord(degree: 4)

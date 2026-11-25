@@ -108,17 +108,9 @@ final class HarpPlayer: ObservableObject {
         let inputs = PlateInputs(chord: chord, key: key, scale: plateScale, strings: stringCount,
                                  octaveShift: octaveShift, pattern: platePattern, custom: customPlateFigure)
         if let cached = plateNotesCache, cached.inputs == inputs { return cached.notes }
-        let notes: [Int]
-        if plateScale != .chord {
-            notes = StrumPlate.notes(for: plateScale, in: key, chord: chord, strings: stringCount,
-                                     octaveShift: octaveShift, pattern: platePattern)
-        } else if let chord {
-            notes = StrumPlate.notes(for: chord, strings: stringCount,
-                                     from: StrumPlate.lowestNote(in: key, octaveShift: octaveShift),
-                                     pattern: platePattern, custom: customPlateFigure)
-        } else {
-            notes = []
-        }
+        let notes = StrumPlate.plate(chord: chord, key: key, scale: plateScale, strings: stringCount,
+                                     octaveShift: octaveShift, pattern: platePattern,
+                                     custom: customPlateFigure)
         plateNotesCache = (inputs, notes)
         return notes
     }
