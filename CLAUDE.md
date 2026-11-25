@@ -340,3 +340,9 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   line with drums), different plugins stop the band and load behind the overlay.
   FWD's SongStore.open / SongPersistence library is the model. Open questions: one or
   several set lists; song tempo vs followed clock; bar-line switching wanted?
+- 2026-11-25: after an unrepeatable hang while strumming: NoteRouter sends everything
+  from its own serial queue (com.fwdharp.notes) and returns at once, so the main thread
+  and the conductor (which calls it with its lock held) never wait on an instrument.
+  Engine all-notes-off and PANIC go through router.afterQueued, after earlier notes.
+  Audition keys (editor, built-in sheet) still call the engine directly. If a hang
+  recurs: iPad Settings ▸ Privacy & Security ▸ Analytics Data, FWDHarp-*.ips.
