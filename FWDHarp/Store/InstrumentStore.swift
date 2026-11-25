@@ -75,7 +75,9 @@ final class InstrumentStore: ObservableObject {
             self?.notice = "\(name) could not be connected, so it has been left out and the part plays without it. It may need audio this app can't give it; try another effect, or remove it."
         }
         engine.onPlaybackInterrupted = { [weak self] _ in
-            self?.engine.allNotesOff()
+            guard let self else { return }
+            let engine = engine
+            router.afterQueued { engine.allNotesOff() }
         }
         // The audio system restarted and every node was thrown away: build the parts
         // again, with their saved sounds.
@@ -324,8 +326,9 @@ final class InstrumentStore: ObservableObject {
         setup.midiOut = settings.normalized()
         router.setSettings(setup.midiOut)
         // A part's own sound switched off: silence what its instrument is playing.
-        for part in HarpPart.allCases where before.playsOwnSound(part) && !setup.midiOut.playsOwnSound(part) {
-            engine.allNotesOff()
+        if HarpPart.allCases.contains(where: { before.playsOwnSound($0) && !setup.midiOut.playsOwnSound($0) }) {
+            let engine = engine
+            router.afterQueued { engine.allNotesOff() }
         }
     }
 

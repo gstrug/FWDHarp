@@ -489,7 +489,9 @@ final class HarpPlayer: ObservableObject {
         held.removeAll()
         plateTouches.removeAll()
         plateLights.clear()
-        store.engine.panic()
+        // After the notes already handed to the router, so none sounds after PANIC.
+        let engine = store.engine
+        store.router.afterQueued { engine.panic() }
         // Every control the slide can move, back to normal.
         sentSlide = nil
         for slide in PlateSlide.allCases { send(slide.reset) }

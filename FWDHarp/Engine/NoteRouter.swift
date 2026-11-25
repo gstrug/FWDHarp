@@ -1,15 +1,22 @@
 import Foundation
 
 /// Where a part's notes go: its instrument in the engine (unless FWD Harp's own sound
-/// is switched off), and MIDI out on the part's channel (when it is on). The plate and
-/// auto-strum both play through here, from the main thread and auto-strum's queue, so
-/// it is thread-safe.
+/// is switched off), and MIDI out on the part's channel (when it is on). The plate,
+/// auto-strum and the rhythm section all play through here.
+///
+/// Everything is SENT FROM ITS OWN QUEUE (code review after a hang, 2026-11-25): a
+/// caller hands the note over and carries straight on. Before, the screen sent each
+/// note itself and waited for the instrument to take it, and a built-in sound takes
+/// notes only between its own audio work; with the iPad busy, a fast strum made the
+/// screen wait note after note, and the beat clock, waiting the same way with its
+/// lock held, could hold up a pad press too. One serial queue keeps every note in the
+/// order it was played; handing over costs a few microseconds.
 nonisolated final class NoteRouter: @unchecked Sendable {
     private let engine: AudioEngineManager
     private let midi: MIDIOutput
-    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "com.fwdharp.notes", qos: .userInteractive)
 
-    // Guarded by `lock`.
+    // Only touched on `queue`.
     private var tracks: [HarpPart: UUID] = [:]
     private var settings = MIDIOutSettings()
     /// Notes sent out over MIDI and not yet released, per channel, so switching MIDI
@@ -22,21 +29,24 @@ nonisolated final class NoteRouter: @unchecked Sendable {
         self.midi = midi
     }
 
-    private func locked<T>(_ body: () -> T) -> T {
-        lock.lock(); defer { lock.unlock() }; return body()
+    /// Runs `body` on the queue, after everything handed over before it.
+    private func locked(_ body: @escaping @Sendable () -> Void) {
+        queue.async(execute: body)
+    }
+
+    /// Engine work that must come after the notes already handed over, such as an
+    /// all-notes-off or PANIC: run in turn on the same queue.
+    func afterQueued(_ work: @escaping @Sendable () -> Void) {
+        queue.async(execute: work)
     }
 
     /// The engine track a part's notes sound on.
     func setTrack(_ trackID: UUID, for part: HarpPart) {
-        locked { tracks[part] = trackID }
-    }
-
-    func track(for part: HarpPart) -> UUID? {
-        locked { tracks[part] }
+        locked { self.tracks[part] = trackID }
     }
 
     func setSettings(_ new: MIDIOutSettings) {
-        locked {
+        locked { [self] in
             let old = settings
             settings = new
             midi.setDestinations(new.enabled ? new.destinations : [])
@@ -49,7 +59,7 @@ nonisolated final class NoteRouter: @unchecked Sendable {
     }
 
     func play(_ part: HarpPart, note: UInt8, velocity: UInt8) {
-        locked {
+        locked { [self] in
             if settings.playsOwnSound(part), let track = tracks[part] {
                 engine.playNote(trackID: track, midiNote: note, velocity: velocity)
             }
@@ -61,7 +71,7 @@ nonisolated final class NoteRouter: @unchecked Sendable {
     }
 
     func stop(_ part: HarpPart, note: UInt8) {
-        locked {
+        locked { [self] in
             // Always to the instrument, even with its sound switched off since the note
             // started: a note-off for a note not playing does no harm.
             if let track = tracks[part] { engine.stopNote(trackID: track, midiNote: note) }
@@ -75,7 +85,7 @@ nonisolated final class NoteRouter: @unchecked Sendable {
     /// A controller, pitch bend or channel aftertouch (`status` 0xB0, 0xE0 or 0xD0, for
     /// the plate's slide) to the part's instrument and its MIDI channel.
     func performance(_ part: HarpPart, status: UInt8, data1: UInt8, data2: UInt8) {
-        locked {
+        locked { [self] in
             if settings.playsOwnSound(part), let track = tracks[part] {
                 engine.sendPerformanceMessage(trackID: track, status: status, data1: data1, data2: data2)
             }
@@ -88,7 +98,7 @@ nonisolated final class NoteRouter: @unchecked Sendable {
     /// PANIC, at the other end of MIDI out too: each note sent is released, then
     /// sustain off and All Notes Off on each part's channel.
     func panicMIDI() {
-        locked {
+        locked { [self] in
             guard settings.enabled else { sentNotes.removeAll(); return }
             releaseSentLocked(through: settings)
             for channel in Set(HarpPart.allCases.map(settings.channel(for:))) {
@@ -97,7 +107,7 @@ nonisolated final class NoteRouter: @unchecked Sendable {
         }
     }
 
-    /// Caller holds `lock`. Sent through the destinations as they were (`old`) before
+    /// On `queue`. Sent through the destinations as they were (`old`) before
     /// a change, so the release goes where its note-on went.
     private func releaseSentLocked(through old: MIDIOutSettings) {
         guard !sentNotes.isEmpty else { return }
