@@ -51,6 +51,11 @@ struct ContentView: View {
         .background(Color(white: 0.08).ignoresSafeArea())
         // Help mode's card at the bottom (HelpMode.swift).
         .helpHost()
+        // A strum that starts at the screen's edge plays, rather than opening the Home
+        // screen or Control Centre: the iPad then needs a second swipe for those
+        // (Graham, 2026-11-25). Four- and five-finger swipes are the iPad's own and no
+        // app can hold them back; they are switched off in its Settings.
+        .defersSystemGestures(on: .all)
         .sheet(isPresented: $showCredits) { CreditsView() }
         .sheet(isPresented: $showMIDI) { MIDISettingsView(player: player) }
         // MIDI in: controllers, MIDI Learn and the clock, for this harp.
