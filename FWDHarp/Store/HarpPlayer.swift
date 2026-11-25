@@ -348,16 +348,22 @@ final class HarpPlayer: ObservableObject {
     func touchMoved(_ id: ObjectIdentifier, string: Int, loudness: Double) {
         guard var touch = plateTouches[id] else { return }
         if string != touch.string {
-            // The new string sounds before the old one is let go, so a note on both
-            // strings is never cut. Strings swept past in between are let go at once.
-            var landed: UInt8?
+            // Each string crossed sounds before the one before it is let go, so a note
+            // on both is never cut. A string with the note this finger is already
+            // sounding is not struck again: in a Custom figure neighbouring strings can
+            // share a note (8 then the next round's 1), and cutting and restriking it a
+            // few milliseconds apart clicked (Graham, 2026-11-25). It rings on.
+            let notes = plateNotes
+            var current = touch.note
             for crossed in StrumPlate.strings(crossedFrom: touch.string, to: string) {
+                let wanted = notes.indices.contains(crossed) ? UInt8(notes[crossed]) : nil
+                if let wanted, wanted == current, ringing.contains(wanted) { continue }
                 let note = pluck(string: crossed, loudness: loudness)
-                if crossed == string { landed = note } else if let note { lift(note: note) }
+                if let old = current { lift(note: old) }
+                current = note
             }
-            if let previous = touch.note { lift(note: previous) }
             touch.string = string
-            touch.note = landed
+            touch.note = current
             // A new string is a new pluck: the slide starts again from here.
             touch.anchor = loudness
         }
