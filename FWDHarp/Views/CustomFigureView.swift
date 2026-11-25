@@ -34,7 +34,7 @@ struct CustomFigureView: View {
                 } header: {
                     Text("Figure")
                 } footer: {
-                    Text("Played up the plate in this order, then again an octave of chord notes higher, to the top string.")
+                    Text("The first step is the lowest note; any step below it is played an octave up, so 5 1 3 and 3 5 1 are inversions. The figure then repeats an octave higher, to the top string.")
                 }
 
                 Section {

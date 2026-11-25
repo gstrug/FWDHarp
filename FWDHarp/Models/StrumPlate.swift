@@ -64,7 +64,10 @@ nonisolated enum StrumPlate {
     static func notes(for chord: Chord, strings: Int, from lowest: Int, pattern: PlatePattern,
                       custom: [Int] = PlatePattern.defaultCustom) -> [Int] {
         // Enough of the straight run for every pattern to look ahead into.
-        let tones = notes(for: chord, strings: strings * 2 + 4, from: lowest)
+        // Custom can climb faster than one chord note a string (a figure of one step
+        // climbs a round per string), so it gets a run long enough for any figure.
+        let run = pattern == .custom ? strings * chord.pitchClasses.count + 8 : strings * 2 + 4
+        let tones = notes(for: chord, strings: run, from: lowest)
         return ordered(tones, strings: strings, pattern: pattern, bass: bass(of: chord, below: tones),
                        custom: custom, chordSize: chord.pitchClasses.count, rootAt: rootIndex(of: chord, in: tones))
     }
@@ -114,11 +117,18 @@ nonisolated enum StrumPlate {
         case .custom:
             // Your own figure, round and round up the plate, each round an octave of
             // chord notes higher: 1 5 3 8 | 8 12 10 15 …
+            // The first step is the figure's lowest note, and any step below it goes
+            // up an octave, so 5 1 3 and 3 5 1 play as inversions (G C E, E G C) —
+            // Graham, 2026-11-25. Each round starts as low on the plate as it can.
             let figure = custom.isEmpty ? PlatePattern.defaultCustom : custom
+            let first = PlatePattern.chordNote(figure[0], chordSize: chordSize)
+            var start = rootAt + first
+            while start - chordSize >= 0 { start -= chordSize }
             result = (0..<strings).map { index in
                 let round = index / figure.count
-                return tone(rootAt + round * chordSize + PlatePattern.chordNote(figure[index % figure.count],
-                                                                       chordSize: chordSize))
+                var step = PlatePattern.chordNote(figure[index % figure.count], chordSize: chordSize)
+                if step < first { step += chordSize }
+                return tone(start + round * chordSize + step - first)
             }
         case .bassAndChord:
             // The bottom strings rock between the root and 5th below the chord, the rest

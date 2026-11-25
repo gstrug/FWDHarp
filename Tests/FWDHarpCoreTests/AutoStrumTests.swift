@@ -125,6 +125,16 @@ final class PatternOptionTests: XCTestCase {
         XCTAssertEqual(triad, [48, 60], "and the octave when it hasn't")
     }
 
+    func testCustomInversions() {
+        func run(_ figure: [Int], strings: Int = 6) -> [Int] {
+            StrumPlate.notes(for: cMajor, strings: strings, from: 48, pattern: .custom, custom: figure)
+        }
+        XCTAssertEqual(run([5, 1, 3]), [55, 60, 64, 67, 72, 76], "G C E, the second inversion")
+        XCTAssertEqual(run([3, 5, 1]), [52, 55, 60, 64, 67, 72], "E G C, the first inversion")
+        XCTAssertEqual(run([5, 3, 1]), [55, 64, 60, 67, 76, 72], "G, then E down to C above it")
+        XCTAssertEqual(run([1], strings: 7), [48, 60, 72, 84, 96, 108, 120], "a one-step figure fills the plate")
+    }
+
     func testCustomCountsFromTheRoot() {
         // F over a plate starting on C3: the figure still begins on F.
         let f = c.chord(degree: 4)

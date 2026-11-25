@@ -139,7 +139,7 @@ enum HelpTopic: String {
         case .keyMode:
             return "A major or minor key, on the same key note (C or Cm). In a minor key the top pads are iv i V, the 5 major as song books play it."
         case .plateOrder:
-            return "The order of notes up the plate: straight, alternating, rolling, octaves, bass and chord, or Custom — your own figure of chord notes (1 3 5 to start), set with Edit Custom…. A swipe then plays that figure."
+            return "The order of notes up the plate: straight, alternating, rolling, octaves, bass and chord, or Custom — your own figure of chord notes (1 3 5 to start; 5 1 3 for an inversion), set with Edit Custom…. A swipe then plays that figure."
         case .ring:
             return "How long a plate note sounds: While Held (until your finger leaves the string), short, medium or long, or until the chord changes."
         case .scale:
