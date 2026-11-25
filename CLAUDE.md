@@ -350,3 +350,10 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   Four/five-finger swipes and pinch are iPadOS's: off only in Settings ▸ Multitasking &
   Gestures (and iPadOS 26–27.2 still swallows them even then: Apple bug FB24795986);
   Guided Access blocks them all for a performance.
+- 2026-11-25: Chromatic back in SCALE (all 12 notes, starts on the key's note and does
+  NOT follow the chord or move with it: for melodies, clashes accepted). Plate order
+  Custom: HarpSetup.customPlateFigure (steps 1 3 5 7 8, 1–8 long, default 1 3 5,
+  PlatePattern.normalized), counted from the chord's root (StrumPlate.rootIndex), each
+  round a chord-size higher; 7 = the octave on triads. Edited in
+  `Views/CustomFigureView.swift` ("Edit Custom…" in the order menu; editing also selects
+  Custom). On scale plates Custom plays Straight.
