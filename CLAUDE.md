@@ -357,3 +357,7 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   round a chord-size higher; 7 = the octave on triads. Edited in
   `Views/CustomFigureView.swift` ("Edit Custom…" in the order menu; editing also selects
   Custom). On scale plates Custom plays Straight.
+  Inversions (same day): the first step is the figure's lowest note, steps below it go
+  up an octave (5 1 3 = G C E, 3 5 1 = E G C), each round starting as low as it can.
+  A sweep no longer restrikes a note the finger is already sounding (Custom can put
+  the same note on neighbouring strings; the cut-and-restrike clicked).
