@@ -7,9 +7,15 @@ struct CustomFigureView: View {
     @ObservedObject var player: HarpPlayer
     @Environment(\.dismiss) private var dismiss
 
-    private var figure: [Int] { player.customPlateFigure }
+    /// The figure being written. It may be emptied to start again (Graham, 2026-11-25:
+    /// the first step could never be removed, so 5 3 1 could not be written); the
+    /// plate keeps playing the last figure with a step in it.
+    @State private var figure: [Int] = []
+    @State private var loaded = false
 
     private func set(_ new: [Int]) {
+        figure = new
+        guard !new.isEmpty else { return }
         player.setCustomPlateFigure(new)
         if player.platePattern != .custom { player.setPlatePattern(.custom) }
     }
@@ -19,22 +25,35 @@ struct CustomFigureView: View {
             Form {
                 Section {
                     HStack(spacing: 8) {
-                        ForEach(Array(figure.enumerated()), id: \.offset) { _, step in
-                            Text("\(step)")
-                                .font(.system(size: 22, weight: .bold, design: .rounded))
-                                .foregroundStyle(StudioStyle.displayText)
-                                .frame(width: 44, height: 44)
-                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(white: 0.12)))
+                        if figure.isEmpty {
+                            Text("Empty: add the first step below")
+                                .foregroundStyle(StudioStyle.scaleText)
+                                .frame(height: 44)
+                        }
+                        // Tap a step to take it out.
+                        ForEach(Array(figure.enumerated()), id: \.offset) { index, step in
+                            Button {
+                                var copy = figure
+                                copy.remove(at: index)
+                                set(copy)
+                            } label: {
+                                Text("\(step)")
+                                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                                    .foregroundStyle(StudioStyle.displayText)
+                                    .frame(width: 44, height: 44)
+                                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(white: 0.12)))
+                            }
+                            .buttonStyle(.plain)
                         }
                         Spacer()
+                        Button("Clear") { set([]) }
+                            .disabled(figure.isEmpty)
                     }
                     .padding(.vertical, 4)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Figure: \(PlatePattern.describe(figure))")
                 } header: {
                     Text("Figure")
                 } footer: {
-                    Text("The first step is the lowest note; any step below it is played an octave up, so 5 1 3 and 3 5 1 are inversions. The figure then repeats an octave higher, to the top string.")
+                    Text("Tap a step to take it out, or Clear to start again. The first step is the lowest note; any step below it is played an octave up, so 5 1 3 and 3 5 1 are inversions. The figure then repeats an octave higher, to the top string.")
                 }
 
                 Section {
@@ -53,7 +72,7 @@ struct CustomFigureView: View {
                         }
                         .frame(width: 48, height: 44)
                         .buttonStyle(.bordered)
-                        .disabled(figure.count <= PlatePattern.customLength.lowerBound)
+                        .disabled(figure.isEmpty)
                         .accessibilityLabel("Remove the last step")
                     }
                     .padding(.vertical, 4)
@@ -66,6 +85,9 @@ struct CustomFigureView: View {
                 Section {
                     Button("Reset to 1 3 5") { set(PlatePattern.defaultCustom) }
                 }
+            }
+            .onAppear {
+                if !loaded { figure = player.customPlateFigure; loaded = true }
             }
             .navigationTitle("Custom Plate Order")
             .navigationBarTitleDisplayMode(.inline)
