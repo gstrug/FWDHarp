@@ -346,3 +346,7 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   Engine all-notes-off and PANIC go through router.afterQueued, after earlier notes.
   Audition keys (editor, built-in sheet) still call the engine directly. If a hang
   recurs: iPad Settings ▸ Privacy & Security ▸ Analytics Data, FWDHarp-*.ips.
+- 2026-11-25: `.defersSystemGestures(on: .all)` on ContentView (edge swipes play first).
+  Four/five-finger swipes and pinch are iPadOS's: off only in Settings ▸ Multitasking &
+  Gestures (and iPadOS 26–27.2 still swallows them even then: Apple bug FB24795986);
+  Guided Access blocks them all for a performance.
