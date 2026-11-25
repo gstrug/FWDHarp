@@ -260,6 +260,7 @@ final class InstrumentStore: ObservableObject {
 
     func setRhythmStyle(_ style: RhythmStyle) { setup.rhythmStyle = style }
     func setPlateSlide(_ slide: PlateSlide) { setup.plateSlide = slide }
+    func setCustomPlateFigure(_ figure: [Int]) { setup.customPlateFigure = PlatePattern.normalized(figure) }
     func setSlideDepth(_ depth: SlideDepth) { setup.slideDepth = depth }
     func setRhythmVariation(_ variation: RhythmVariation) { setup.rhythmVariation = variation }
 

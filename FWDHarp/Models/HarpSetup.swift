@@ -68,6 +68,8 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var autoStrumPattern: AutoStrumPattern = .style
     /// The order of the notes up the plate for hand strumming.
     var platePattern: PlatePattern = .straight
+    /// The Custom plate order's figure (PlatePattern.customSteps), 1 3 5 to start.
+    var customPlateFigure: [Int] = PlatePattern.defaultCustom
     /// What the plate plays: the chord held, or a scale in the key.
     var plateScale: PlateScale = .chord
     /// How long plate notes sound.
@@ -185,7 +187,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
         case plateStrings, octaveShift, autoStrumPattern, tempo, platePattern, plateScale
         case autoSound, plateMix, autoMix, masterVolume, plateRing, midiOut
         case drumsSound, bassSound, drumsMix, bassMix, rhythmStyle, rhythmVariation
-        case plateSlide, slideDepth
+        case plateSlide, slideDepth, customPlateFigure
     }
 
     /// Read from older files, never written.
@@ -232,6 +234,8 @@ nonisolated struct HarpSetup: Codable, Equatable {
         rhythmVariation = (try? c.decodeIfPresent(RhythmVariation.self, forKey: .rhythmVariation)) ?? .a
         plateSlide = (try? c.decodeIfPresent(PlateSlide.self, forKey: .plateSlide)) ?? .expression
         slideDepth = (try? c.decodeIfPresent(SlideDepth.self, forKey: .slideDepth)) ?? .medium
+        customPlateFigure = PlatePattern.normalized(
+            (try? c.decodeIfPresent([Int].self, forKey: .customPlateFigure)) ?? PlatePattern.defaultCustom)
     }
 }
 

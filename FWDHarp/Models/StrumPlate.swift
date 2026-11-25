@@ -41,6 +41,12 @@ nonisolated enum StrumPlate {
     }
 
     /// The notes of a set of pitch classes in order up from `lowest`, one per string.
+    /// Where the chord's root first comes in `tones` (the plate may start on its 3rd
+    /// or 5th): a Custom figure counts its steps from there, so 1 is always the root.
+    private static func rootIndex(of chord: Chord, in tones: [Int]) -> Int {
+        tones.prefix(chord.pitchClasses.count).firstIndex { $0 % 12 == chord.root } ?? 0
+    }
+
     static func notes(pitchClasses classes: Set<Int>, strings: Int, from lowest: Int) -> [Int] {
         guard !classes.isEmpty, strings > 0 else { return [] }
         var result: [Int] = []
@@ -55,16 +61,19 @@ nonisolated enum StrumPlate {
     /// The note on each string in a plate pattern's order. Built from the straight run
     /// of the chord's notes from `lowest`; strings that would go past the top of MIDI
     /// are left off.
-    static func notes(for chord: Chord, strings: Int, from lowest: Int, pattern: PlatePattern) -> [Int] {
+    static func notes(for chord: Chord, strings: Int, from lowest: Int, pattern: PlatePattern,
+                      custom: [Int] = PlatePattern.defaultCustom) -> [Int] {
         // Enough of the straight run for every pattern to look ahead into.
         let tones = notes(for: chord, strings: strings * 2 + 4, from: lowest)
-        return ordered(tones, strings: strings, pattern: pattern, bass: bass(of: chord, below: tones))
+        return ordered(tones, strings: strings, pattern: pattern, bass: bass(of: chord, below: tones),
+                       custom: custom, chordSize: chord.pitchClasses.count, rootAt: rootIndex(of: chord, in: tones))
     }
 
     /// A scale on the plate (PlateScale), one note per string up from the chord's first
     /// note at or above the plate's bottom (the key's note, moved by OCT), in the plate
     /// pattern's order. Every scale follows `chord`, the one held now. Bass + Chord has
-    /// no chord to take a bass from, so it plays Straight.
+    /// no chord to take a bass from, and Custom is a figure of chord notes, so both play
+    /// Straight.
     static func notes(for scale: PlateScale, in key: MusicKey, chord: Chord?, strings: Int,
                       octaveShift: Int, pattern: PlatePattern) -> [Int] {
         guard let classes = scale.pitchClasses(in: key, chord: chord) else { return [] }
@@ -72,15 +81,21 @@ nonisolated enum StrumPlate {
         // or above the plate's bottom, so a scale never starts on a clash (2026-11-23).
         let bottom = lowestNote(in: key, octaveShift: octaveShift)
         let home = Set((chord ?? key.tonicChord).pitchClasses)
-        let start = (bottom..<(bottom + 12)).first { home.contains($0 % 12) } ?? bottom
+        // Chromatic stays put on the key's note: a tune's notes must not move when the
+        // chord changes (2026-11-25).
+        let start = scale == .chromatic ? bottom
+            : (bottom..<(bottom + 12)).first { home.contains($0 % 12) } ?? bottom
         let tones = notes(pitchClasses: classes, strings: strings * 2 + 4, from: start)
-        return ordered(tones, strings: strings, pattern: pattern == .bassAndChord ? .straight : pattern,
+        let chordOnly: Set<PlatePattern> = [.bassAndChord, .custom]
+        return ordered(tones, strings: strings, pattern: chordOnly.contains(pattern) ? .straight : pattern,
                        bass: nil)
     }
 
     /// The straight run `tones` put in a plate pattern's order, one note per string.
     private static func ordered(_ tones: [Int], strings: Int, pattern: PlatePattern,
-                                bass: (root: Int, fifth: Int)?) -> [Int] {
+                                bass: (root: Int, fifth: Int)?,
+                                custom: [Int] = PlatePattern.defaultCustom, chordSize: Int = 3,
+                                rootAt: Int = 0) -> [Int] {
         guard strings > 0, !tones.isEmpty else { return [] }
         func tone(_ index: Int) -> Int? { tones.indices.contains(index) ? tones[index] : nil }
         var result: [Int?]
@@ -96,6 +111,15 @@ nonisolated enum StrumPlate {
         case .octaves:
             // Each chord note with its octave: 1 8 3 10 5 12 …
             result = (0..<strings).map { $0 % 2 == 0 ? tone($0 / 2) : tone($0 / 2).map { $0 + 12 } }
+        case .custom:
+            // Your own figure, round and round up the plate, each round an octave of
+            // chord notes higher: 1 5 3 8 | 8 12 10 15 …
+            let figure = custom.isEmpty ? PlatePattern.defaultCustom : custom
+            result = (0..<strings).map { index in
+                let round = index / figure.count
+                return tone(rootAt + round * chordSize + PlatePattern.chordNote(figure[index % figure.count],
+                                                                       chordSize: chordSize))
+            }
         case .bassAndChord:
             // The bottom strings rock between the root and 5th below the chord, the rest
             // run straight up above them.
@@ -149,6 +173,9 @@ nonisolated enum StrumPlate {
 /// (design brief, "Plate patterns"). Sweeping down plays the figure in reverse.
 nonisolated enum PlatePattern: String, CaseIterable, Codable {
     case straight, alternating, rolling, octaves, bassAndChord
+    /// Your own figure of chord notes (Graham, 2026-11-25), such as 1 5 3 8, repeated up
+    /// the plate. Starts as a three-note arpeggio, 1 3 5.
+    case custom
 
     var title: String {
         switch self {
@@ -157,7 +184,36 @@ nonisolated enum PlatePattern: String, CaseIterable, Codable {
         case .rolling: return "Rolling"
         case .octaves: return "Octaves"
         case .bassAndChord: return "Bass + Chord"
+        case .custom: return "Custom"
         }
+    }
+
+    /// A custom figure's steps: 1 the root, 3 the chord's 3rd (or the 2nd or 4th of a
+    /// sus chord), 5 its 5th, 7 its 7th (the octave when it has none), 8 the octave.
+    static let customSteps = [1, 3, 5, 7, 8]
+    static let defaultCustom = [1, 3, 5]
+    static let customLength = 1...8
+
+    /// Which of the chord's notes, counted from its root, a step is.
+    static func chordNote(_ step: Int, chordSize: Int) -> Int {
+        switch step {
+        case 1: return 0
+        case 3: return 1
+        case 5: return 2
+        case 7: return chordSize > 3 ? 3 : chordSize
+        default: return chordSize
+        }
+    }
+
+    /// A figure as written: "1 5 3 8".
+    static func describe(_ figure: [Int]) -> String {
+        figure.map(String.init).joined(separator: " ")
+    }
+
+    /// A figure kept to the steps and length allowed; anything else becomes 1 3 5.
+    static func normalized(_ figure: [Int]) -> [Int] {
+        let kept = figure.filter(customSteps.contains)
+        return customLength.contains(kept.count) ? kept : defaultCustom
     }
 }
 
@@ -178,14 +234,17 @@ nonisolated enum PlatePattern: String, CaseIterable, Codable {
 /// - Blues: over a major chord 1 2 3 5 6 ♭7 (the bluesy flat 7th, without the ♭3 that
 ///   rubbed against the chord's 3rd); over a minor one the minor blues, 1 ♭3 4 ♭5 5 ♭7.
 ///
-/// Natural Minor and Chromatic were taken out (2026-11-23): Natural Minor was the
-/// same notes as Major, and Chromatic clashed on every other string. A setup saved
-/// with them opens on Chord.
+/// - Chromatic: every note, for playing tunes note by note. It does NOT follow the
+///   chord, so half its strings clash with it: back by Graham's wish (2026-11-25), for
+///   melodies, knowing that.
+///
+/// Natural Minor was taken out (2026-11-23): it was the same notes as Major. A setup
+/// saved with it opens on Chord.
 nonisolated enum PlateScale: String, CaseIterable, Codable {
     case chord
     /// Saved as "major", from when it was the key's whole major scale.
     case major
-    case pentatonic, minorPentatonic, blues
+    case pentatonic, minorPentatonic, blues, chromatic
 
     var title: String {
         switch self {
@@ -194,6 +253,7 @@ nonisolated enum PlateScale: String, CaseIterable, Codable {
         case .pentatonic: return "Pentatonic"
         case .minorPentatonic: return "Minor Pentatonic"
         case .blues: return "Blues"
+        case .chromatic: return "Chromatic"
         }
     }
 
@@ -223,6 +283,8 @@ nonisolated enum PlateScale: String, CaseIterable, Codable {
             return Self.fitted(on(root, [0, 3, 5, 7, 10]), to: chord, in: key)
         case .blues:
             return on(chord.root, minor ? [0, 3, 5, 6, 7, 10] : [0, 2, 4, 7, 9, 10])
+        case .chromatic:
+            return Set(0..<12)
         }
     }
 
@@ -257,7 +319,7 @@ nonisolated enum PlateScale: String, CaseIterable, Codable {
     func autoStrumColour(in key: MusicKey, chord: Chord?) -> Set<Int>? {
         switch self {
         case .pentatonic, .minorPentatonic: return pitchClasses(in: key, chord: chord)
-        case .chord, .major, .blues: return nil
+        case .chord, .major, .blues, .chromatic: return nil
         }
     }
 }

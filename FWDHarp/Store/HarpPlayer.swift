@@ -92,6 +92,13 @@ final class HarpPlayer: ObservableObject {
 
 
     var platePattern: PlatePattern { store.setup.platePattern }
+    var customPlateFigure: [Int] { store.setup.customPlateFigure }
+
+    /// A new Custom figure: held strings follow it, as they follow a chord change.
+    func setCustomPlateFigure(_ figure: [Int]) {
+        store.setCustomPlateFigure(figure)
+        retuneHeldStrings()
+    }
 
     /// The note on each string, bottom string first, in the plate pattern's order: the
     /// scale chosen, or the chord held now (empty with none held).
@@ -99,7 +106,7 @@ final class HarpPlayer: ObservableObject {
     /// for it (code review, 2026-11-23).
     var plateNotes: [Int] {
         let inputs = PlateInputs(chord: chord, key: key, scale: plateScale, strings: stringCount,
-                                 octaveShift: octaveShift, pattern: platePattern)
+                                 octaveShift: octaveShift, pattern: platePattern, custom: customPlateFigure)
         if let cached = plateNotesCache, cached.inputs == inputs { return cached.notes }
         let notes: [Int]
         if plateScale != .chord {
@@ -108,7 +115,7 @@ final class HarpPlayer: ObservableObject {
         } else if let chord {
             notes = StrumPlate.notes(for: chord, strings: stringCount,
                                      from: StrumPlate.lowestNote(in: key, octaveShift: octaveShift),
-                                     pattern: platePattern)
+                                     pattern: platePattern, custom: customPlateFigure)
         } else {
             notes = []
         }
@@ -123,6 +130,7 @@ final class HarpPlayer: ObservableObject {
         let strings: Int
         let octaveShift: Int
         let pattern: PlatePattern
+        let custom: [Int]
     }
     private var plateNotesCache: (inputs: PlateInputs, notes: [Int])?
 

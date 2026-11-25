@@ -111,6 +111,33 @@ final class PatternOptionTests: XCTestCase {
         StrumPlate.notes(for: cMajor, strings: strings, from: 48, pattern: pattern)
     }
 
+    func testCustomStartsAsTheStraightArpeggio() {
+        XCTAssertEqual(plate(.custom), plate(.straight), "1 3 5 on a triad is the straight order")
+    }
+
+    func testCustomFigureRepeatsUpThePlate() {
+        let notes = StrumPlate.notes(for: cMajor, strings: 8, from: 48, pattern: .custom, custom: [1, 5, 3, 8])
+        XCTAssertEqual(notes, [48, 55, 52, 60, 60, 67, 64, 72])
+        let seventh = StrumPlate.notes(for: cMajor.withSeventh, strings: 4, from: 48, pattern: .custom,
+                                       custom: [1, 7, 8, 7])
+        XCTAssertEqual(seventh, [48, 58, 60, 58], "7 is the chord's 7th when it has one")
+        let triad = StrumPlate.notes(for: cMajor, strings: 2, from: 48, pattern: .custom, custom: [1, 7])
+        XCTAssertEqual(triad, [48, 60], "and the octave when it hasn't")
+    }
+
+    func testCustomCountsFromTheRoot() {
+        // F over a plate starting on C3: the figure still begins on F.
+        let f = c.chord(degree: 4)
+        let notes = StrumPlate.notes(for: f, strings: 3, from: 48, pattern: .custom, custom: [1, 3, 5])
+        XCTAssertEqual(notes, [53, 57, 60])
+    }
+
+    func testCustomFigureIsKeptSensible() {
+        XCTAssertEqual(PlatePattern.normalized([]), [1, 3, 5])
+        XCTAssertEqual(PlatePattern.normalized([1, 2, 5]), [1, 5])
+        XCTAssertEqual(PlatePattern.normalized(Array(repeating: 1, count: 9)), [1, 3, 5])
+    }
+
     func testTwoOctaveArpeggios() {
         let notes = StrumPlate.notes(for: cMajor, strings: 10, from: 48)
         let up = (0..<8).flatMap { AutoStrum.notes(.arpeggio2Up, step: $0, plateNotes: notes, chord: cMajor) }
@@ -231,12 +258,18 @@ final class ScaleTests: XCTestCase {
                          pattern: pattern)
     }
 
+    func testChromaticHasEveryNote() {
+        XCTAssertEqual(plate(.chromatic, chord: c.chord(degree: 5), strings: 13), Array(48...60),
+                       "every note, whatever the chord")
+        XCTAssertNil(PlateScale.chromatic.autoStrumColour(in: c, chord: c.chord(degree: 1)))
+    }
+
     func testEveryScaleHasTheStringsChosen() {
         for scale in PlateScale.allCases where scale != .chord {
             XCTAssertEqual(plate(scale, strings: 13).count, 13, scale.title)
         }
         XCTAssertEqual(PlateScale.allCases.map(\.title),
-                       ["Chord", "Melody", "Pentatonic", "Minor Pentatonic", "Blues"])
+                       ["Chord", "Melody", "Pentatonic", "Minor Pentatonic", "Blues", "Chromatic"])
     }
 
     /// Melody: the key's notes less the one that clashes with the chord (2026-11-23).

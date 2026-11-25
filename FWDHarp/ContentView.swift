@@ -293,6 +293,7 @@ private struct PlateControls: View {
     @ObservedObject var player: HarpPlayer
     /// Portrait: wrapped to the plate's width instead of two wide rows.
     var narrow = false
+    @State private var showCustomFigure = false
 
     var body: some View {
         if narrow {
@@ -337,10 +338,17 @@ private struct PlateControls: View {
         StudioMenu(title: player.platePattern.title, label: "Plate order",
                    titles: PlatePattern.allCases.map(\.title)) {
             ForEach(PlatePattern.allCases, id: \.self) { pattern in
-                check(pattern.title, pattern == player.platePattern) { player.setPlatePattern(pattern) }
+                check(pattern == .custom ? "Custom (\(PlatePattern.describe(player.customPlateFigure)))"
+                                         : pattern.title,
+                      pattern == player.platePattern) { player.setPlatePattern(pattern) }
+            }
+            Divider()
+            Button { showCustomFigure = true } label: {
+                Label("Edit Custom…", systemImage: "slider.horizontal.3")
             }
         }
         .helpTag(.plateOrder)
+        .sheet(isPresented: $showCustomFigure) { CustomFigureView(player: player) }
     }
 
     private var ringMenu: some View {
