@@ -27,11 +27,14 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     AutoStrumBar(player: player)
                     RhythmControls(player: player)
+                    // Each part's level, mute and solo, in reach while playing (Graham,
+                    // 2026-11-27). The full mixer has them too, so it is hidden there.
+                    if !showMixer { LiveMixRow(player: player, narrow: narrow) }
                     if showMixer {
                         MixerPanel(player: player, onDone: { showMixer = false })
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     } else {
-                        PadsView(player: player)
+                        PadsView(player: player, maxUnit: padUnit)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
@@ -76,6 +79,14 @@ struct ContentView: View {
 
     /// Narrower than this (an iPad in portrait), the screen's rows wrap.
     static let narrowWidth: CGFloat = 1000
+
+    /// The pads' size: what fits in portrait on this iPad, in both orientations, so a
+    /// bigger iPad gets bigger pads (Graham, 2026-11-27).
+    private var padUnit: CGFloat {
+        let screen = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.screen.bounds.size }.first ?? .zero
+        return PadLayout.unit(forShortSide: min(screen.width, screen.height))
+    }
 
     private var topBar: some View {
         // Each part's instrument over its own side of the screen: auto-strum's on the
@@ -362,42 +373,15 @@ private struct PlateControls: View {
     }
 
     private var octaveGroup: some View {
-                HStack(spacing: 8) {
-                Text("OCT")
-                    .font(.system(size: 11, weight: .bold)).tracking(0.8)
-                    .foregroundStyle(StudioStyle.scaleText)
-                octaveButton("chevron.down", step: -1, label: "Octave down",
-                             enabled: player.octaveShift > StrumPlate.octaveShiftRange.lowerBound)
-                Text(player.octaveShift > 0 ? "+\(player.octaveShift)" : "\(player.octaveShift)")
-                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(StudioStyle.displayText)
-                    .frame(minWidth: 22)
-                    .accessibilityLabel("Octave \(player.octaveShift)")
-                octaveButton("chevron.up", step: 1, label: "Octave up",
-                             enabled: player.octaveShift < StrumPlate.octaveShiftRange.upperBound)
-                }
-                .helpTag(.octave)
+        OctaveStepper(value: player.octaveShift, name: "Plate octave",
+                      up: .octaveUp, down: .octaveDown) { player.shiftOctave(by: $0) }
+            .helpTag(.octave)
     }
 
     private func check(_ title: String, _ selected: Bool, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             if selected { Label(title, systemImage: "checkmark") } else { Text(title) }
         }
-    }
-
-    private func octaveButton(_ symbol: String, step: Int, label: String, enabled: Bool) -> some View {
-        Button { player.shiftOctave(by: step) } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(enabled ? Color(white: 0.87) : Color(white: 0.35))
-                .frame(width: 34, height: 30)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Color(white: 0.22)))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityLabel(label)
-        .midiLearnable(step > 0 ? .octaveUp : .octaveDown)
     }
 }
 
@@ -495,6 +479,9 @@ private struct AutoStrumBar: View {
             }
             .accessibilityLabel("Pattern: \(player.autoStrumPattern.title)")
             .helpTag(.autoPattern)
+            OctaveStepper(value: player.autoOctaveShift, name: "Auto-strum octave",
+                          up: .autoOctaveUp, down: .autoOctaveDown) { player.shiftAutoOctave(by: $0) }
+                .helpTag(.autoOctave)
 
             // One tempo for auto-strum and the rhythm section. Following a MIDI clock,
             // it shows the clock's tempo and can't be changed here.
@@ -671,4 +658,44 @@ private struct CPUReadout: View {
 
 #Preview {
     ContentView()
+}
+
+/// OCT ◀ n ▶: whole octaves down or up, two at most. The plate and auto-strum each
+/// have one (Graham, 2026-11-27).
+private struct OctaveStepper: View {
+    let value: Int
+    let name: String
+    let up: MIDIControlTarget
+    let down: MIDIControlTarget
+    let step: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("OCT")
+                .font(.system(size: 11, weight: .bold)).tracking(0.8)
+                .foregroundStyle(StudioStyle.scaleText)
+            button("chevron.down", by: -1, enabled: value > StrumPlate.octaveShiftRange.lowerBound)
+            Text(value > 0 ? "+\(value)" : "\(value)")
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .foregroundStyle(StudioStyle.displayText)
+                .frame(minWidth: 22)
+                .accessibilityLabel("\(name) \(value)")
+            button("chevron.up", by: 1, enabled: value < StrumPlate.octaveShiftRange.upperBound)
+        }
+    }
+
+    private func button(_ symbol: String, by amount: Int, enabled: Bool) -> some View {
+        Button { step(amount) } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(enabled ? Color(white: 0.87) : Color(white: 0.35))
+                .frame(width: 34, height: 30)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color(white: 0.22)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel("\(name) \(amount > 0 ? "up" : "down")")
+        .midiLearnable(amount > 0 ? up : down)
+    }
 }

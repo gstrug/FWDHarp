@@ -89,6 +89,7 @@ final class HarpPlayer: ObservableObject {
     /// Strings on the plate: the number chosen, whatever it plays.
     var stringCount: Int { store.setup.plateStrings }
     var octaveShift: Int { store.setup.octaveShift }
+    var autoOctaveShift: Int { store.setup.autoOctaveShift }
 
 
     var platePattern: PlatePattern { store.setup.platePattern }
@@ -126,11 +127,12 @@ final class HarpPlayer: ObservableObject {
     }
     private var plateNotesCache: (inputs: PlateInputs, notes: [Int])?
 
-    /// The plate's notes in straight order, which auto-strum's figures are built from.
+    /// The chord's notes in straight order from auto-strum's own octave (the key's note
+    /// in octave 3, moved by its OCT), which its figures are built from.
     private var straightNotes: [Int] {
         guard let chord else { return [] }
         return StrumPlate.notes(for: chord, strings: stringCount,
-                                from: StrumPlate.lowestNote(in: key, octaveShift: octaveShift))
+                                from: StrumPlate.lowestNote(in: key, octaveShift: autoOctaveShift))
     }
 
     func setPlatePattern(_ pattern: PlatePattern) {
@@ -194,8 +196,14 @@ final class HarpPlayer: ObservableObject {
         syncAutoStrum(newPad: false)
     }
 
+    /// The plate's octave. Auto-strum has its own (shiftAutoOctave).
     func shiftOctave(by step: Int) {
         store.setOctaveShift(octaveShift + step)
+        retuneHeldStrings()
+    }
+
+    func shiftAutoOctave(by step: Int) {
+        store.setAutoOctaveShift(autoOctaveShift + step)
         syncAutoStrum(newPad: false)
     }
 

@@ -56,6 +56,29 @@ final class PartsTests: XCTestCase {
     }
 }
 
+final class AutoOctaveTests: XCTestCase {
+    func testAnOlderSetupKeepsAutoStrumWhereThePlateWas() throws {
+        var setup = HarpSetup()
+        setup.octaveShift = 1
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(setup)) as? [String: Any])
+        json.removeValue(forKey: "autoOctaveShift")
+        let back = try JSONDecoder().decode(HarpSetup.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(back.autoOctaveShift, 1)
+        XCTAssertEqual(back.octaveShift, 1)
+    }
+
+    func testTheTwoOctavesAreSavedApart() throws {
+        var setup = HarpSetup()
+        setup.octaveShift = -1
+        setup.autoOctaveShift = 2
+        let back = try JSONDecoder().decode(HarpSetup.self, from: JSONEncoder().encode(setup))
+        XCTAssertEqual(back.octaveShift, -1)
+        XCTAssertEqual(back.autoOctaveShift, 2)
+        setup.autoOctaveShift = 9
+        XCTAssertEqual(setup.normalized().autoOctaveShift, 0)
+    }
+}
+
 final class PlateRingTests: XCTestCase {
     func testRingTimes() {
         XCTAssertEqual(PlateRing.short.seconds, 0.4)

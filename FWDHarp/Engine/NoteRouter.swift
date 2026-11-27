@@ -23,6 +23,10 @@ nonisolated final class NoteRouter: @unchecked Sendable {
     /// out off (or a channel change) can release them rather than leave them hanging
     /// in another app.
     private var sentNotes: [Int: Set<UInt8>] = [:]
+    /// Parts muted, or silenced by another part's solo: their new notes go nowhere,
+    /// not to the instrument and not to MIDI out (Graham, 2026-11-27). Note-offs still
+    /// go, so nothing already sounding is left hanging.
+    private var silenced: Set<HarpPart> = []
 
     init(engine: AudioEngineManager, midi: MIDIOutput = .shared) {
         self.engine = engine
@@ -58,8 +62,25 @@ nonisolated final class NoteRouter: @unchecked Sendable {
         }
     }
 
+    /// Which parts are silent now. A part that has just gone silent has its notes at
+    /// the other end of MIDI out released, so another app stops it too.
+    func setSilenced(_ parts: Set<HarpPart>) {
+        locked { [self] in
+            let newly = parts.subtracting(silenced)
+            silenced = parts
+            guard settings.enabled, !newly.isEmpty else { return }
+            // A channel still used by a part that is playing is left alone.
+            let playing = Set(HarpPart.allCases.filter { !parts.contains($0) }.map(settings.channel(for:)))
+            for channel in Set(newly.map(settings.channel(for:))) where !playing.contains(channel) {
+                for note in sentNotes[channel] ?? [] { midi.send(MIDIBytes.noteOff(note, channel: channel)) }
+                sentNotes[channel] = nil
+            }
+        }
+    }
+
     func play(_ part: HarpPart, note: UInt8, velocity: UInt8) {
         locked { [self] in
+            guard !silenced.contains(part) else { return }
             if settings.playsOwnSound(part), let track = tracks[part] {
                 engine.playNote(trackID: track, midiNote: note, velocity: velocity)
             }
