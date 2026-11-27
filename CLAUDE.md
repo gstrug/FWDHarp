@@ -12,7 +12,7 @@ code wins — then fix this file.
   (Xcode, App Store Connect, github.com), talk him through it click by click.
 - Personal project. GitHub: `gstrug/FWDHarp`, branch `main`.
 - Apple developer team `8MDY92DSB9`, bundle id `com.grahamstruwig.FWDHarp`.
-- Version 1.0, build 4 in the project (TestFlight 2026-11-23, and again 2026-11-25 with Xcode raising the number on upload; build 2 was the first, 2026-11-21). Every TestFlight upload needs `CURRENT_PROJECT_VERSION`
+- Version 1.0, build 5 (2026-11-27; build 4 went to TestFlight 2026-11-23 and again 2026-11-25 with Xcode raising the number on upload; build 2 was the first, 2026-11-21). Every TestFlight upload needs `CURRENT_PROJECT_VERSION`
   bumped first (Debug and Release), committed as "Bump build to NN for TestFlight".
 - Commit often with plain-English messages stating *why*. Author commits as
   `Graham Struwig <g.struwig@gmail.com>`.
