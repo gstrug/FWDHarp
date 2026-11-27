@@ -126,6 +126,21 @@ nonisolated struct PadLayout: Equatable {
                          y: (size.height - unit * Self.gridSize.height) / 2)
     }
 
+    /// At most `maxUnit` pad-widths, in the bottom-left corner, under the left hand
+    /// (Graham, 2026-11-27: the pads keep their portrait size in landscape too).
+    init(size: CGSize, maxUnit: CGFloat) {
+        let fits = max(0, min(size.width / Self.gridSize.width, size.height / Self.gridSize.height))
+        let unit = min(fits, max(0, maxUnit))
+        self.unit = unit
+        origin = CGPoint(x: 0, y: size.height - unit * Self.gridSize.height)
+    }
+
+    /// The pad size for a screen whose short side is `shortSide`: what portrait gives,
+    /// the short side less the margins (20 each side), the gap (24) and the plate (300).
+    static func unit(forShortSide shortSide: CGFloat) -> CGFloat {
+        max(0, (shortSide - 364) / gridSize.width)
+    }
+
     func frame(of pad: ChordPad) -> CGRect {
         let side = unit * pad.sizeFraction
         let p = pad.gridPosition

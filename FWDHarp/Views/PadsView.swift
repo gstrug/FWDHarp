@@ -9,10 +9,13 @@ struct PadsView: View {
     @State private var touches = PadTouches()
     @ObservedObject private var learn = MIDIControlCenter.shared.learn
     @ObservedObject private var help = HelpCenter.shared
+    /// The largest pad size (PadLayout.unit(forShortSide:)): with it the pads keep
+    /// their portrait size in landscape and sit bottom-left, under the hand.
+    var maxUnit: CGFloat? = nil
 
     var body: some View {
         GeometryReader { proxy in
-            let layout = PadLayout(size: proxy.size)
+            let layout = maxUnit.map { PadLayout(size: proxy.size, maxUnit: $0) } ?? PadLayout(size: proxy.size)
             ZStack(alignment: .topLeading) {
                 ForEach(ChordPad.allCases, id: \.self) { pad in
                     let frame = layout.frame(of: pad)

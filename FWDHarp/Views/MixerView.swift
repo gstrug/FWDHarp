@@ -134,16 +134,12 @@ private struct PartStrip: View {
                            format: { _ in panLabel })
                     .midiLearnable(.partPan(part))
                     .helpTag(.mixerPan, instance: part.rawValue)
-                StudioToggleChip(title: "M",
-                                 isOn: Binding(get: { mix.muted }, set: { store.setMuted($0, for: part) }),
-                                 tint: .orange,
-                                 accessibilityLabel: "Mute \(part.title)")
-                    .midiLearnable(.partMute(part))
-                    .helpTag(.mixerMute, instance: part.rawValue)
             }
             // Auto-strum without a sound of its own plays on the plate's channel.
             .disabled(!hasOwn)
             .opacity(hasOwn ? 1 : 0.35)
+            // Mute and solo work either way: they hold back the part's own notes.
+            MuteSoloChips(store: store, part: part)
 
             if part == .auto {
                 StudioToggleChip(title: "OWN SOUND",

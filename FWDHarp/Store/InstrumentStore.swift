@@ -30,6 +30,9 @@ final class InstrumentStore: ObservableObject {
     /// True while an instrument loads; the screen is blocked until it is ready
     /// (FWD lesson 1: interrupting a fragile AUv3 while it loads crashes it).
     @Published private(set) var isLoading = false
+    /// The parts soloed now. Not saved (Graham, 2026-11-27): the app never opens with
+    /// parts silent for a reason no longer on screen. Mute is saved, in the mix.
+    @Published private(set) var soloed: Set<HarpPart> = []
     @Published private(set) var loadingName: String?
     @Published var notice: String?
     /// The meters, kept apart so their 20-a-second updates redraw only the meters.
@@ -104,6 +107,7 @@ final class InstrumentStore: ObservableObject {
         isLoading = false
         loadingName = nil
         for part in HarpPart.allCases { buildPart(part) }
+        applySilence()
         engine.setMasterVolume(setup.masterVolume)
     }
 
@@ -111,8 +115,8 @@ final class InstrumentStore: ObservableObject {
         guard let sound = setup.sound(of: part) else { return }
         let id = Self.trackID(for: part)
         let mix = setup.mix(of: part)
-        engine.addTrack(id: id, volume: mix.effectiveVolume, pan: mix.pan, builtInSound: sound.builtInSound)
-        engine.setVolume(mix.effectiveVolume, for: id)
+        engine.addTrack(id: id, volume: audibleVolume(of: part), pan: mix.pan, builtInSound: sound.builtInSound)
+        engine.setVolume(audibleVolume(of: part), for: id)
         engine.setPan(mix.pan, for: id)
         if let plugin = sound.instrument {
             load(plugin, state: sound.instrumentState, for: part)
@@ -159,6 +163,7 @@ final class InstrumentStore: ObservableObject {
             setup.autoSound = nil
         }
         updateRoutes()
+        applySilence()
     }
 
     private func updateSound(of part: HarpPart, _ change: (inout PartSound) -> Void) {
@@ -264,6 +269,11 @@ final class InstrumentStore: ObservableObject {
     func setSlideDepth(_ depth: SlideDepth) { setup.slideDepth = depth }
     func setRhythmVariation(_ variation: RhythmVariation) { setup.rhythmVariation = variation }
 
+    func setAutoOctaveShift(_ shift: Int) {
+        setup.autoOctaveShift = min(max(shift, StrumPlate.octaveShiftRange.lowerBound),
+                                    StrumPlate.octaveShiftRange.upperBound)
+    }
+
     func setOctaveShift(_ shift: Int) {
         setup.octaveShift = min(max(shift, StrumPlate.octaveShiftRange.lowerBound),
                                 StrumPlate.octaveShiftRange.upperBound)
@@ -275,7 +285,7 @@ final class InstrumentStore: ObservableObject {
         var mix = setup.mix(of: part)
         mix.volume = ChannelMix.clampVolume(volume, default: mix.volume)
         setup.setMix(mix, for: part)
-        engine.setVolume(mix.effectiveVolume, for: Self.trackID(for: part))
+        engine.setVolume(audibleVolume(of: part), for: Self.trackID(for: part))
     }
 
     func setPan(_ pan: Float, for part: HarpPart) {
@@ -289,7 +299,38 @@ final class InstrumentStore: ObservableObject {
         var mix = setup.mix(of: part)
         mix.muted = muted
         setup.setMix(mix, for: part)
-        engine.setVolume(mix.effectiveVolume, for: Self.trackID(for: part))
+        applySilence()
+    }
+
+    func isSoloed(_ part: HarpPart) -> Bool { soloed.contains(part) }
+
+    /// Solo: while any part is soloed, only the soloed parts sound, on the iPad and
+    /// over MIDI out. Several can be soloed at once.
+    func setSoloed(_ on: Bool, for part: HarpPart) {
+        if on { soloed.insert(part) } else { soloed.remove(part) }
+        applySilence()
+    }
+
+    /// Muted, or silenced because another part is soloed.
+    func isSilenced(_ part: HarpPart) -> Bool {
+        setup.mix(of: part).muted || (!soloed.isEmpty && !soloed.contains(part))
+    }
+
+    /// The level a part's own track plays at: its fader, or nothing while it is
+    /// silenced. The plate's track also carries auto-strum when that has no sound of
+    /// its own, so it goes quiet only when both are silenced (the router holds back
+    /// each part's own notes).
+    private func audibleVolume(of part: HarpPart) -> Float {
+        var quiet = isSilenced(part)
+        if part == .plate, !hasOwnSound(.auto) { quiet = quiet && isSilenced(.auto) }
+        return quiet ? 0 : setup.mix(of: part).volume
+    }
+
+    private func applySilence() {
+        router.setSilenced(Set(HarpPart.allCases.filter(isSilenced)))
+        for part in HarpPart.allCases where hasOwnSound(part) {
+            engine.setVolume(audibleVolume(of: part), for: Self.trackID(for: part))
+        }
     }
 
     func setMasterVolume(_ volume: Float) {

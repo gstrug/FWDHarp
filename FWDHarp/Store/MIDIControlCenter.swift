@@ -360,6 +360,8 @@ final class MIDIControlCenter: ObservableObject {
         case .tapTempo:         if !player.isFollowingClock { player.tapTempo() }
         case .panic:            player.panic()
         case .octaveUp:         player.shiftOctave(by: 1)
+        case .autoOctaveUp:     player.shiftAutoOctave(by: 1)
+        case .autoOctaveDown:   player.shiftAutoOctave(by: -1)
         case .octaveDown:       player.shiftOctave(by: -1)
         case .rhythmStartStop:  player.toggleRhythm()
         case .rhythmStop:       if player.rhythm.running { player.toggleRhythm() }
@@ -375,6 +377,8 @@ final class MIDIControlCenter: ObservableObject {
         case .variationB:       player.setRhythmVariation(.b)
         case .previousStyle:    player.stepRhythmStyle(by: -1)
         case .nextStyle:        player.stepRhythmStyle(by: 1)
+        case .partSolo(let part):
+            store.setSoloed(!store.isSoloed(part), for: part)
         case .partMute(let part):
             store.setMuted(!store.setup.mix(of: part).muted, for: part)
         case .partEffects(let part):

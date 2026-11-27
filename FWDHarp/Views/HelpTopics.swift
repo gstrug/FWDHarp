@@ -24,8 +24,8 @@ enum HelpTopic: String {
     case key, keyMode, plateOrder, ring, scale, strings, octave, strumPlate
 
     // Mixer
-    case mixerMaster, mixerFader, mixerPan, mixerMute, mixerEffects, mixerOwnSound,
-         mixerInstrument, mixerDone
+    case mixerMaster, mixerFader, mixerPan, mixerMute, mixerSolo, mixerEffects, mixerOwnSound,
+         mixerInstrument, mixerDone, liveMix, autoOctave
 
     var title: String {
         switch self {
@@ -71,6 +71,9 @@ enum HelpTopic: String {
         case .mixerFader: return "Volume"
         case .mixerPan: return "Pan"
         case .mixerMute: return "Mute"
+        case .mixerSolo: return "Solo"
+        case .liveMix: return "Live Mix"
+        case .autoOctave: return "Auto-Strum Octave"
         case .mixerEffects: return "Effects"
         case .mixerOwnSound: return "Own Sound"
         case .mixerInstrument: return "Instrument"
@@ -147,7 +150,7 @@ enum HelpTopic: String {
         case .strings:
             return "How many strings the plate has, in the same height: 10 for three octaves of a chord, more for a finer, wider plate."
         case .octave:
-            return "Moves the whole plate down or up an octave, two at most."
+            return "Moves the whole plate down or up an octave, two at most. Auto-strum has its own OCT, in its row."
         case .strumPlate:
             return "Touch a string to pluck it, or swipe across to strum; low at the bottom. Further right plays louder. Slide a held finger sideways to swell, soften or bend it (MIDI ▸ Strum Plate Slide)."
 
@@ -158,7 +161,13 @@ enum HelpTopic: String {
         case .mixerPan:
             return "Places this part left or right. Double tap for the centre."
         case .mixerMute:
-            return "Silences this part; it keeps playing, unheard."
+            return "Silences this part, here and over MIDI out; it keeps playing, unheard."
+        case .mixerSolo:
+            return "Hear only the soloed parts: every part not soloed goes silent, here and over MIDI out. Solo several to hear them together. Not kept when the app closes."
+        case .liveMix:
+            return "Each part's level, mute and solo, to reach while playing. The same settings as the mixer: a change here shows there."
+        case .autoOctave:
+            return "Moves auto-strum's patterns down or up an octave, two at most. The plate has its own OCT."
         case .mixerEffects:
             return "Tap to switch this part's effects on or off. Long press to edit them."
         case .mixerOwnSound:

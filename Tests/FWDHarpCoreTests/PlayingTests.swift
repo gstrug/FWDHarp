@@ -130,6 +130,19 @@ final class PadTests: XCTestCase {
         XCTAssertNil(layout.pad(at: CGPoint(x: -5, y: -5)))
     }
 
+    func testPadsKeepTheirPortraitSizeUnderTheHand() {
+        // An 11-inch iPad: 834 points across in portrait.
+        let unit = PadLayout.unit(forShortSide: 834)
+        XCTAssertEqual(unit, 470 / PadLayout.gridSize.width, accuracy: 0.001)
+        let landscape = PadLayout(size: CGSize(width: 830, height: 560), maxUnit: unit)
+        XCTAssertEqual(landscape.unit, unit, accuracy: 0.001, "no bigger in landscape")
+        XCTAssertEqual(landscape.origin.x, 0)
+        XCTAssertEqual(landscape.origin.y + unit * PadLayout.gridSize.height, 560, accuracy: 0.001, "at the bottom")
+        let cramped = PadLayout(size: CGSize(width: 300, height: 200), maxUnit: unit)
+        XCTAssertLessThan(cramped.unit, unit, "smaller when there is less room")
+        XCTAssertGreaterThan(PadLayout.unit(forShortSide: 1024), unit, "bigger on a bigger iPad")
+    }
+
     func testThePadsFitTheSpaceGiven() {
         let size = CGSize(width: 640, height: 420)
         let layout = PadLayout(size: size)

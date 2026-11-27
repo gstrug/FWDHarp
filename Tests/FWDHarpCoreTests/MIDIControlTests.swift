@@ -60,6 +60,8 @@ final class MIDIControlTests: XCTestCase {
         XCTAssertEqual(t.mapping(for: .masterVolume)?.source.number, 7)
         XCTAssertEqual(t.mapping(for: .rhythmStartStop)?.source.number, 41)
         XCTAssertEqual(t.mapping(for: .rhythmStop)?.source.number, 42)
+        XCTAssertEqual(t.mapping(for: .partSolo(.plate))?.source.number, 32, "the strip's S button")
+        XCTAssertEqual(t.mapping(for: .partSolo(.bass))?.source.number, 35)
         XCTAssertEqual(Set(t.mappings.map(\.source)).count, t.mappings.count, "no message used twice")
         XCTAssertEqual(Set(t.mappings.map(\.id)).count, t.mappings.count)
     }

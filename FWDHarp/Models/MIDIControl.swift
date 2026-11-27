@@ -17,13 +17,13 @@ nonisolated enum MIDIControlTarget: Codable, Hashable {
     case pad(ChordPad)
     case hold, autoStrum, tapTempo, panic
     case tempo
-    case octaveUp, octaveDown
+    case octaveUp, octaveDown, autoOctaveUp, autoOctaveDown
     // The rhythm section.
     case rhythmStartStop, rhythmStop, rhythmSync, fill, introOutro, variationA, variationB
     case previousStyle, nextStyle
     // The mixer.
     case masterVolume
-    case partVolume(HarpPart), partPan(HarpPart), partMute(HarpPart), partEffects(HarpPart)
+    case partVolume(HarpPart), partPan(HarpPart), partMute(HarpPart), partSolo(HarpPart), partEffects(HarpPart)
 
     /// Continuous targets take the knob or fader's position; the rest act on a press.
     var isContinuous: Bool {
@@ -49,6 +49,8 @@ nonisolated enum MIDIControlTarget: Codable, Hashable {
         case .tempo:                return "Tempo"
         case .octaveUp:             return "Plate Octave Up"
         case .octaveDown:           return "Plate Octave Down"
+        case .autoOctaveUp:         return "Auto-Strum Octave Up"
+        case .autoOctaveDown:       return "Auto-Strum Octave Down"
         case .rhythmStartStop:      return "Drums Start / Stop"
         case .rhythmStop:           return "Drums Stop"
         case .rhythmSync:           return "Drums Sync"
@@ -62,6 +64,7 @@ nonisolated enum MIDIControlTarget: Codable, Hashable {
         case .partVolume(let p):    return "\(p.title) Volume"
         case .partPan(let p):       return "\(p.title) Pan"
         case .partMute(let p):      return "\(p.title) Mute"
+        case .partSolo(let p):      return "\(p.title) Solo"
         case .partEffects(let p):   return "\(p.title) FX On/Off"
         }
     }
@@ -261,7 +264,7 @@ nonisolated enum MIDIBuiltInTemplates {
 
     /// Korg nanoKONTROL2, factory CC mode, global channel 1, laid out like FWD
     /// Sequencer's: the first four strips are the plate, auto-strum, drums and bass
-    /// (fader, pan knob, M mute, R effects); fader 8 is the master and knob 8 the tempo.
+    /// (fader, pan knob, S solo, M mute, R effects); fader 8 is the master and knob 8 the tempo.
     /// Transport: ▶ starts and stops the drums, ■ stops them, ● fills, cycle is HOLD,
     /// ◀◀ intro/outro, ▶▶ tap tempo, track ◀ ▶ variations A and B, marker ◀ ▶ styles.
     static let nanoKONTROL2: MIDIControllerTemplate = {
@@ -275,6 +278,7 @@ nonisolated enum MIDIBuiltInTemplates {
         for (strip, part) in HarpPart.allCases.enumerated() {
             cc(0 + strip, .partVolume(part))
             cc(16 + strip, .partPan(part))
+            cc(32 + strip, .partSolo(part))
             cc(48 + strip, .partMute(part))
             cc(64 + strip, .partEffects(part))
         }

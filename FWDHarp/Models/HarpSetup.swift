@@ -63,6 +63,9 @@ nonisolated struct HarpSetup: Codable, Equatable {
     var plateStrings: Int = StrumPlate.defaultStrings
     /// The plate moved up or down by whole octaves (StrumPlate.octaveShiftRange).
     var octaveShift: Int = 0
+    /// Auto-strum's own octave (Graham, 2026-11-27), apart from the plate's. A setup
+    /// from before takes the plate's, so it sounds as it did.
+    var autoOctaveShift: Int = 0
     /// Auto-strum's pattern and speed. Whether it is on is not saved: it starts off.
     /// New setups start on Style, the rhythm style's own harp part (2026-11-23).
     var autoStrumPattern: AutoStrumPattern = .style
@@ -167,6 +170,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
                 ?? StrumPlate.defaultStrings
         }
         if !StrumPlate.octaveShiftRange.contains(copy.octaveShift) { copy.octaveShift = 0 }
+        if !StrumPlate.octaveShiftRange.contains(copy.autoOctaveShift) { copy.autoOctaveShift = 0 }
         if !AutoStrum.tempoRange.contains(copy.tempo) || !copy.tempo.isFinite { copy.tempo = AutoStrum.defaultTempo }
         copy.plateSound = copy.plateSound.normalized()
         copy.autoSound = copy.autoSound?.normalized()
@@ -184,7 +188,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, instrument, instrumentState, builtInSound, effects, effectsBypassed, keyTonic, keyMinor
-        case plateStrings, octaveShift, autoStrumPattern, tempo, platePattern, plateScale
+        case plateStrings, octaveShift, autoOctaveShift, autoStrumPattern, tempo, platePattern, plateScale
         case autoSound, plateMix, autoMix, masterVolume, plateRing, midiOut
         case drumsSound, bassSound, drumsMix, bassMix, rhythmStyle, rhythmVariation
         case plateSlide, slideDepth, customPlateFigure
@@ -213,6 +217,7 @@ nonisolated struct HarpSetup: Codable, Equatable {
             plateStrings = StrumPlate.defaultStrings
         }
         octaveShift = try c.decodeIfPresent(Int.self, forKey: .octaveShift) ?? 0
+        autoOctaveShift = try c.decodeIfPresent(Int.self, forKey: .autoOctaveShift) ?? octaveShift
         // A pattern this version does not know (from a later one) falls back.
         autoStrumPattern = (try? c.decodeIfPresent(AutoStrumPattern.self, forKey: .autoStrumPattern)) ?? .arpeggioUp
         tempo = try c.decodeIfPresent(Double.self, forKey: .tempo) ?? AutoStrum.defaultTempo
