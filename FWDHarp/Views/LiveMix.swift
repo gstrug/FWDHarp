@@ -1,57 +1,58 @@
 import SwiftUI
 
-/// Each part's level, mute and solo in one slim row above the pads, to reach while
-/// playing (Graham, 2026-11-27: the mixer is fine for setting up, but hard to get at
-/// mid-song; FWD Sequencer has these on each track). The same settings as the mixer,
-/// so a change in one shows in the other. Portrait: two rows of two.
-struct LiveMixRow: View {
+/// Each part's level, mute and solo, to reach while playing (Graham, 2026-11-27: the
+/// mixer is fine for setting up, but hard to get at mid-song; FWD Sequencer has these
+/// on each track). Small upright faders in the room above the pads, which keep their
+/// portrait size: a row of horizontal sliders pushed the plate off an 11-inch screen.
+/// The same settings as the mixer, so a change in one shows in the other.
+struct LiveMixStrips: View {
     @ObservedObject var player: HarpPlayer
-    var narrow = false
 
     private var store: InstrumentStore { player.store }
+    /// The name above each fader and M S below it.
+    private static let around: CGFloat = 62
 
     var body: some View {
-        let parts = HarpPart.allCases
-        Group {
-            if narrow {
-                Grid(horizontalSpacing: 10, verticalSpacing: 8) {
-                    ForEach(Array(stride(from: 0, to: parts.count, by: 2)), id: \.self) { first in
-                        GridRow {
-                            ForEach(parts[first..<min(first + 2, parts.count)], id: \.self) { part in
-                                LiveMixItem(store: store, part: part)
-                            }
-                        }
+        GeometryReader { geometry in
+            let fader = min(220, geometry.size.height - Self.around)
+            // Too little room (a narrow window): the mixer still has them all.
+            if fader >= 60 {
+                HStack(alignment: .bottom, spacing: 16) {
+                    ForEach(HarpPart.allCases, id: \.self) { part in
+                        LiveMixStrip(store: store, part: part, faderHeight: fader)
                     }
                 }
-            } else {
-                HStack(spacing: 10) {
-                    ForEach(parts, id: \.self) { part in LiveMixItem(store: store, part: part) }
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-private struct LiveMixItem: View {
+private struct LiveMixStrip: View {
     @ObservedObject var store: InstrumentStore
     let part: HarpPart
+    let faderHeight: CGFloat
 
     private var hasOwn: Bool { store.hasOwnSound(part) }
 
+    private var dB: Binding<Double> {
+        Binding(get: { Double(FaderScale.dB(fromLinear: store.setup.mix(of: part).volume)) },
+                set: { store.setVolume(FaderScale.linear(fromDB: Float($0)), for: part) })
+    }
+
     var body: some View {
-        HStack(spacing: 6) {
+        VStack(spacing: 6) {
             Text(part.title.uppercased())
                 .font(.system(size: 10, weight: .bold)).tracking(0.6)
                 .foregroundStyle(StudioStyle.scaleText)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .frame(width: 46, alignment: .leading)
-            StudioSlider.volume(Binding(get: { store.setup.mix(of: part).volume },
-                                        set: { store.setVolume($0, for: part) }),
-                                label: "\(part.title) volume")
-                .frame(minWidth: 60, maxWidth: .infinity)
-                .frame(height: 34)
+                .fixedSize()
+            StudioFader(value: dB,
+                        range: Double(FaderScale.minDB)...Double(FaderScale.maxDB),
+                        defaultValue: 0,
+                        height: faderHeight,
+                        accessibilityLabel: "\(part.title) volume",
+                        format: { $0 <= Double(FaderScale.minDB) ? "-∞" : String(format: "%+.1f dB", $0) })
                 // Auto-strum without a sound of its own plays at the plate's level.
                 .disabled(!hasOwn)
                 .opacity(hasOwn ? 1 : 0.35)
@@ -59,7 +60,6 @@ private struct LiveMixItem: View {
                 .helpTag(.liveMix, instance: part.rawValue)
             MuteSoloChips(store: store, part: part)
         }
-        .frame(maxWidth: .infinity)
     }
 }
 

@@ -27,15 +27,20 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     AutoStrumBar(player: player)
                     RhythmControls(player: player)
-                    // Each part's level, mute and solo, in reach while playing (Graham,
-                    // 2026-11-27). The full mixer has them too, so it is hidden there.
-                    if !showMixer { LiveMixRow(player: player, narrow: narrow) }
                     if showMixer {
                         MixerPanel(player: player, onDone: { showMixer = false })
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     } else {
-                        PadsView(player: player, maxUnit: padUnit)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // The pads at their fixed size at the bottom; above them, each
+                        // part's level, mute and solo, in reach while playing.
+                        VStack(spacing: 10) {
+                            LiveMixStrips(player: player)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            PadsView(player: player, maxUnit: padUnit)
+                                .frame(maxWidth: .infinity)
+                                .frame(maxHeight: padUnit * PadLayout.gridSize.height)
+                                .layoutPriority(1)
+                        }
                     }
                 }
                 // The controls may be wider than the plate; they line up with its right
