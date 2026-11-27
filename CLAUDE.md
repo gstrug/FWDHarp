@@ -379,3 +379,7 @@ and quarantine (`Store/SongPersistence.swift`). Bring each with its tests.
   OctaveStepper view. Pads: PadLayout(size:maxUnit:) bottom-left, maxUnit =
   PadLayout.unit(forShortSide: screen short side) = portrait size, so landscape keeps
   it and bigger iPads scale. Mock-up agreed with Graham first.
+  Same day: the horizontal live row pushed the plate off an 11-inch landscape screen
+  (4 items' minimum width > the pads' side). Now `Views/LiveMix.swift` LiveMixStrips:
+  upright StudioFaders (up to 220 high, hidden under 60) + M S, in the room above the
+  pads; the pads are framed to their fixed height at the bottom (layoutPriority 1).
